@@ -1,3 +1,4 @@
+from config import XF_USER, XF_TFA_TRUST, XF_SESSION, FORUM_BASE
 import os
 import asyncio
 import aiohttp
