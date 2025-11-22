@@ -82,76 +82,79 @@ class ForumTracker:
         return None
 
     async def _check_url(self, session: aiohttp.ClientSession, url: str, subscribers):
-    """
-    Проверяет один трек (тему или форум) и уведомляет подписчиков о новых постах/темах.
-    subscribers: list of (peer_id, type, last_id)
-    """
-    url = normalize_url(url)
-    typ = "thread" if "/threads/" in url else "forum" if "/forums/" in url else "unknown"
-    if typ == "unknown":
-        return
-
-    # --- GET с куками ---
-    cookies_list = [
-        {"xf_user": self.XF_USER, "xf_session": self.XF_SESSION, "xf_tfa_trust": self.XF_TFA_TRUST}
-    ]
-    html = None
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-    for cookies in cookies_list:
-        try:
-            async with session.get(url, headers=headers, cookies=cookies, timeout=30) as resp:
-                if resp.status == 200:
-                    html = await resp.text()
-                    break
-        except:
-            continue
-    if not html:
-        print("Failed to fetch:", url)
-        return
-
-    soup = BeautifulSoup(html, "html.parser")
-
-    if typ == "thread":
-        # --- парсим посты ---
-        posts = soup.select("article.message.message--post")
-        if not posts:
+        """
+        Проверяет один трек (тему или форум) и уведомляет подписчиков о новых постах/темах.
+        subscribers: list of (peer_id, type, last_id)
+        """
+        url = normalize_url(url)
+        typ = "thread" if "/threads/" in url else "forum" if "/forums/" in url else "unknown"
+        if typ == "unknown":
             return
-        parsed = []
-        for node in posts:
-            post_id = node.get("data-message-id") or node.get("id")
-            text_node = node.select_one("div.bbWrapper")
-            text = text_node.get_text("\n", strip=True) if text_node else ""
-            if post_id and text:
-                parsed.append({"id": str(post_id), "text": text})
-        if not parsed:
-            return
-        newest = parsed[-1]  # последний пост
-        for peer_id, _, last_id in subscribers:
-            if last_id is None or last_id != newest["id"]:
-                excerpt = newest["text"][:1500]
-                self.vk.send(peer_id, f"[Новый пост]\n{excerpt}\n\n{url}")
-                update_last(peer_id, url, newest["id"])
 
-    elif typ == "forum":
-        # --- парсим темы ---
-        threads = []
-        nodes = soup.select("div.structItem.structItem--thread a.structItem-title")
-        for a in nodes:
-            href = a.get("href")
-            if not href:
-                continue
-            full_url = href if href.startswith("http") else "https://forum.matrp.ru" + href
-            tid = extract_thread_id(full_url)
-            if tid:
-                threads.append((tid, full_url, a.get_text(strip=True)))
-        # dedupe
-        seen = {tid: (full, title) for tid, full, title in threads}
-        for peer_id, _, last_id in subscribers:
-            # отправляем только новые темы
-            to_send = [ (tid, full, title) for tid, (full, title) in seen.items()
-                        if last_id is None or tid != last_id ]
-            for tid, full, title in reversed(to_send):
-                self.vk.send(peer_id, f"🆕 Новая тема:\n{title}\n{full}")
-                update_last(peer_id, url, tid)
+        # --- GET с куками ---
+        html = await self._fetch_with_all_cookies(session, url)
+        if not html:
+            print("Failed to fetch:", url)
+            return
+
+        soup = BeautifulSoup(html, "html.parser")
+
+        if typ == "thread":
+            # --- парсим посты ---
+            posts = soup.select("article.message.message--post")
+            if not posts:
+                return
+            parsed = []
+            for node in posts:
+                post_id = node.get("data-message-id") or node.get("id")
+                text_node = node.select_one("div.bbWrapper")
+                text = text_node.get_text("\n", strip=True) if text_node else ""
+                author_node = node.select_one("a.username") or node.select_one("h4.message-name span")
+                author = author_node.get_text(strip=True) if author_node else "Неизвестный"
+                datetime_node = node.select_one("time") or node.select_one("span.u-dt")
+                datetime = datetime_node.get("datetime") or (datetime_node.get_text(strip=True) if datetime_node else "Неизвестно")
+                link_node = node.select_one("a.u-anchorTarget")
+                link = url + "#" + link_node.get("id") if link_node else url
+                if post_id and text:
+                    parsed.append({
+                        "id": str(post_id),
+                        "text": text,
+                        "author": author,
+                        "datetime": datetime,
+                        "link": link
+                    })
+            if not parsed:
+                return
+            newest = parsed[-1]  # последний пост
+            for peer_id, _, last_id in subscribers:
+                if last_id is None or last_id != newest["id"]:
+                    excerpt = newest["text"][:1500]
+                    msg = (f"[Новый пост]\nАвтор: {newest['author']}\n"
+                           f"Дата: {newest['datetime']}\n"
+                           f"{excerpt}\n\nСсылка: {newest['link']}")
+                    self.vk.send(peer_id, msg)
+                    update_last(peer_id, url, newest["id"])
+
+        elif typ == "forum":
+            # --- парсим темы ---
+            threads = []
+            nodes = soup.select("div.structItem.structItem--thread a.structItem-title")
+            for a in nodes:
+                href = a.get("href")
+                if not href:
+                    continue
+                full_url = href if href.startswith("http") else "https://forum.matrp.ru" + href
+                tid = extract_thread_id(full_url)
+                if tid:
+                    threads.append((tid, full_url, a.get_text(strip=True)))
+            # dedupe
+            seen = {tid: (full, title) for tid, full, title in threads}
+            for peer_id, _, last_id in subscribers:
+                # отправляем только новые темы
+                to_send = [(tid, full, title) for tid, (full, title) in seen.items()
+                           if last_id is None or tid != last_id]
+                for tid, full, title in reversed(to_send):
+                    self.vk.send(peer_id, f"🆕 Новая тема:\n{title}\n{full}")
+                    update_last(peer_id, url, tid)
         else:
             return
