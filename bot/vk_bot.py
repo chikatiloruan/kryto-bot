@@ -1,3 +1,4 @@
+from config import VK_TOKEN
 import os
 import threading
 import time
