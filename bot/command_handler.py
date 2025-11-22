@@ -1,13 +1,14 @@
-from .storage import (
+from bot.storage import (
     add_track, remove_track, list_tracks,
     add_warn, get_warns, clear_warns,
     add_ban, remove_ban, is_banned,
     stat_inc, stat_get
 )
-from .deepseek_ai import ask_ai
-from .permissions import is_admin
-from .utils import normalize_url, detect_type
+from bot.deepseek_ai import ask_ai
+from bot.permissions import is_admin
+from bot.utils import normalize_url, detect_type
 import re
+
 
 class CommandHandler:
     def __init__(self, vk):
