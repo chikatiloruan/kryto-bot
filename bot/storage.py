@@ -15,7 +15,7 @@ def init_db():
         conn = _conn()
         cur = conn.cursor()
 
-        # Трекинг
+        # ---------------- TRACKS ----------------
         cur.execute("""
         CREATE TABLE IF NOT EXISTS tracks (
             peer_id INTEGER NOT NULL,
@@ -25,7 +25,7 @@ def init_db():
             PRIMARY KEY(peer_id, url)
         )""")
 
-        # Варны
+        # ---------------- WARNS ----------------
         cur.execute("""
         CREATE TABLE IF NOT EXISTS warns (
             peer_id INTEGER,
@@ -34,7 +34,7 @@ def init_db():
             PRIMARY KEY(peer_id, user_id)
         )""")
 
-        # Баны
+        # ---------------- BANS ----------------
         cur.execute("""
         CREATE TABLE IF NOT EXISTS bans (
             peer_id INTEGER,
@@ -42,12 +42,18 @@ def init_db():
             PRIMARY KEY(peer_id, user_id)
         )""")
 
+        # ---------------- STATS ----------------
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS stats (
+            name TEXT PRIMARY KEY,
+            count INTEGER DEFAULT 0
+        )""")
+
         conn.commit()
         conn.close()
 
 
 # ---------------- TRACKS ----------------
-
 def add_track(peer_id: int, url: str, type_: str):
     with _lock:
         conn = _conn()
@@ -100,7 +106,6 @@ def update_last(peer_id: int, url: str, last_id: str):
 
 
 # ---------------- WARNS ----------------
-
 def add_warn(peer_id: int, user_id: int):
     with _lock:
         conn = _conn()
@@ -142,7 +147,6 @@ def clear_warns(peer_id: int, user_id: int):
 
 
 # ---------------- BANS ----------------
-
 def add_ban(peer_id: int, user_id: int):
     with _lock:
         conn = _conn()
@@ -178,6 +182,7 @@ def is_banned(peer_id: int, user_id: int) -> bool:
     conn.close()
     return bool(r)
 
+
 # ---------------- STATS ----------------
 def stat_inc(name: str):
     """Увеличить счетчик статистики на 1"""
@@ -185,18 +190,13 @@ def stat_inc(name: str):
         conn = _conn()
         cur = conn.cursor()
         cur.execute("""
-            CREATE TABLE IF NOT EXISTS stats (
-                name TEXT PRIMARY KEY,
-                count INTEGER DEFAULT 0
-            )
-        """)
-        cur.execute("""
             INSERT INTO stats (name, count)
             VALUES (?, 1)
             ON CONFLICT(name) DO UPDATE SET count = count + 1
         """, (name,))
         conn.commit()
         conn.close()
+
 
 def stat_get(name: str) -> int:
     """Получить текущее значение счетчика статистики"""
@@ -206,4 +206,3 @@ def stat_get(name: str) -> int:
     r = cur.fetchone()
     conn.close()
     return r[0] if r else 0
-
