@@ -4,8 +4,8 @@ import threading
 import time
 from vk_api.bot_longpoll import VkBotLongPoll, VkBotEventType
 import vk_api
-from .command_handler import CommandHandler
-from .storage import init_db
+from bot.command_handler import CommandHandler
+from bot.storage import init_db
 from aiohttp import web
 import asyncio
 
