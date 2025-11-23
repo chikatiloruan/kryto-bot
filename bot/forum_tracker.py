@@ -1,31 +1,23 @@
 # bot/forum_tracker.py
-import asyncio
 import threading
-import sys
 import time
-import traceback
 import requests
 from bs4 import BeautifulSoup
-
-from .utils import (
-    detect_type,
-    extract_thread_id,
-    extract_post_id_from_anchor,
-)
+from .utils import detect_type, extract_thread_id, extract_post_id_from_anchor, normalize_url
 from .storage import list_all_tracks, update_last
-from .config import COOKIE
+from config import XF_USER, XF_SESSION, XF_TFA_TRUST, FORUM_BASE, POLL_INTERVAL_SEC
 
 def log(msg):
-    print(f"[TRACKER] {msg}", file=sys.stderr)
+    print("[TRACKER]", msg)
 
+def build_cookie_header():
+    return f"xf_user={XF_USER}; xf_session={XF_SESSION}; xf_tfa_trust={XF_TFA_TRUST}"
 
 class ForumTracker:
     def __init__(self, vk):
         self.vk = vk
+        self.interval = int(POLL_INTERVAL_SEC or 20)
         self.running = False
-        self.interval = 20  # сек
-
-        # callback на /check
         self.vk.set_trigger(self.force_check)
 
     def start(self):
@@ -33,131 +25,108 @@ class ForumTracker:
         t.start()
 
     def force_check(self):
-        log("Forced check triggered")
-        self.check()
+        # run check once in background
+        t = threading.Thread(target=self.check_all, daemon=True)
+        t.start()
 
     def loop(self):
         self.running = True
-        log("ForumTracker started")
-
+        log("ForumTracker loop started")
         while self.running:
             try:
-                self.check()
+                self.check_all()
             except Exception as e:
-                log(f"CHECK ERROR: {e}\n{traceback.format_exc()}")
+                log(f"Tracker loop error: {e}")
             time.sleep(self.interval)
 
-    def check(self):
-        tracks = list_all_tracks()
+    def check_all(self):
+        rows = list_all_tracks()
+        if not rows:
+            return
+        by_url = {}
+        for peer_id, url, typ, last_id in rows:
+            by_url.setdefault(url, []).append((peer_id, typ, last_id))
 
-        for peer_id, url, ttype, last in tracks:
+        for url, subscribers in by_url.items():
             try:
-                if ttype == "thread":
-                    self.check_thread(peer_id, url, last)
-                elif ttype == "forum":
-                    self.check_forum(peer_id, url, last)
+                self._check_url(url, subscribers)
             except Exception as e:
-                log(f"TRACK ERROR for {url}: {e}\n{traceback.format_exc()}")
+                log(f"Error checking {url}: {e}")
 
-    # ================= THREAD MODE ====================
-
-    def check_thread(self, peer_id, url, last_id):
-        log(f"Checking thread: {url}")
-
-        html = self.fetch(url)
-        if not html:
-            return
-
-        soup = BeautifulSoup(html, "html.parser")
-
-        posts = soup.select("article")
-        if not posts:
-            log("No article nodes found in thread")
-            return
-
-        last_post = posts[-1]
-        pid = extract_post_id_from_anchor(last_post)
-
-        if not pid:
-            log(f"No post-id extracted in {url}")
-            return
-
-        if last_id and pid == last_id:
-            return
-
-        user_el = last_post.select_one(".message-userDetails a")
-        user = user_el.text.strip() if user_el else "Неизвестно"
-
-        date_el = last_post.select_one("time")
-        date = date_el.text.strip() if date_el else "N/A"
-
-        text_el = last_post.select_one(".bbWrapper")
-        text = text_el.text.strip()[:500] if text_el else "(без текста)"
-
-        msg = (
-            "🆕 Новое сообщение в теме:\n"
-            f"👤 {user}\n"
-            f"📅 {date}\n"
-            f"💬 {text}\n"
-            f"🔗 {url}"
-        )
-        self.vk.send(peer_id, msg)
-        update_last(peer_id, url, pid)
-
-    # ================= FORUM MODE =====================
-
-    def check_forum(self, peer_id, url, last_id):
-        log(f"Checking forum: {url}")
-
-        html = self.fetch(url)
-        if not html:
-            return
-
-        soup = BeautifulSoup(html, "html.parser")
-
-        topics = soup.select("div.structItem--thread")
-        if not topics:
-            log("No topics found")
-            return
-
-        top = topics[0]
-
-        link = top.select_one("a.structItem-title")
-        if not link:
-            return
-
-        topic_url = link["href"]
-        topic_title = link.text.strip()
-
-        pid = extract_thread_id(topic_url)
-        if not pid:
-            log("Forum topic ID not extracted")
-            return
-
-        if last_id and pid == last_id:
-            return
-
-        user_el = top.select_one(".username")
-        user = user_el.text.strip() if user_el else "Неизвестно"
-
-        msg = (
-            "🆕 Новая тема в разделе:\n"
-            f"📌 {topic_title}\n"
-            f"👤 {user}\n"
-            f"🔗 {topic_url}"
-        )
-        self.vk.send(peer_id, msg)
-        update_last(peer_id, url, pid)
-
-    # ================= FETCH ====================
-
-    def fetch(self, url):
+    def _fetch(self, url):
+        headers = {
+            "User-Agent": "Mozilla/5.0",
+            "Cookie": build_cookie_header()
+        }
         try:
-            r = requests.get(url, headers={"Cookie": COOKIE}, timeout=10)
-            if r.status_code != 200:
-                log(f"HTTP ERROR {r.status_code} for {url}")
-                return None
-            return r.text
-        except Exception as e:
-            log(f"REQUEST ERROR: {e}")
+            r = requests.get(url, headers=headers, timeout=20)
+            if r.status_code == 200:
+                return r.text
+            log(f"HTTP {r.status_code} for {url}")
             return None
+        except Exception as e:
+            log(f"Fetch error for {url}: {e}")
+            return None
+
+    def _check_url(self, url, subscribers):
+        url = normalize_url(url)
+        typ = detect_type(url)
+        html = self._fetch(url)
+        if not html:
+            return
+        soup = BeautifulSoup(html, "html.parser")
+
+        if typ == "thread":
+            posts = soup.select("article.message, article.message--post, article.message--post.js-post")
+            if not posts:
+                return
+            newest = posts[-1]
+            post_id = extract_post_id_from_anchor(newest) or extract_thread_id(url)
+            author_node = newest.select_one(".message-name a, .username, .message-userCard a")
+            author = author_node.get_text(strip=True) if author_node else "Неизвестно"
+            date_node = newest.select_one("time")
+            date = date_node.get("datetime") if date_node and date_node.get("datetime") else (date_node.get_text(strip=True) if date_node else "?")
+            body_node = newest.select_one(".bbWrapper, .message-body, .message-content")
+            text = body_node.get_text("\n", strip=True) if body_node else "(нет текста)"
+            link_to_post = f"{url}#post-{post_id}" if post_id else url
+            for peer_id, _, last_id in subscribers:
+                if last_id is None or str(last_id) != str(post_id):
+                    msg = f"📝 Новый пост в теме\n📅 {date}\n👤 {author}\n\n{text[:1500]}\n\n🔗 {link_to_post}"
+                    try:
+                        self.vk.send(peer_id, msg)
+                    except Exception as e:
+                        log(f"VK send error: {e}")
+                    update_last(peer_id, url, str(post_id))
+
+        elif typ == "forum":
+            items = soup.select(".structItem--thread, .structItem")
+            if not items:
+                return
+            parsed = []
+            for it in items:
+                link_node = it.select_one(".structItem-title a, a[href*='/threads/'], a[href*='index.php?threads=']")
+                if not link_node:
+                    continue
+                href = link_node.get("href") or ""
+                full = href if href.startswith("http") else (FORUM_BASE.rstrip("/") + href)
+                tid = extract_thread_id(full)
+                title = link_node.get_text(strip=True)
+                author_node = it.select_one(".structItem-minor a, .structItem-parts a, .username")
+                author = author_node.get_text(strip=True) if author_node else "Неизвестно"
+                if tid:
+                    parsed.append({"tid": tid, "title": title, "author": author, "url": full})
+            # sort by id (as int) to try sending newest last
+            try:
+                parsed_sorted = sorted(parsed, key=lambda x: int(x["tid"]))
+            except Exception:
+                parsed_sorted = parsed
+            for peer_id, _, last_id in subscribers:
+                # send up to last 6 newest threads
+                for th in parsed_sorted[-6:]:
+                    if last_id is None or str(th["tid"]) != str(last_id):
+                        msg = f"🆕 Новая тема\n📄 {th['title']}\n👤 Автор: {th['author']}\n🔗 {th['url']}"
+                        try:
+                            self.vk.send(peer_id, msg)
+                        except Exception as e:
+                            log(f"VK send error: {e}")
+                        update_last(peer_id, url, th["tid"])
