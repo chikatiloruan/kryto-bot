@@ -1,28 +1,20 @@
-# bot/command.py
+# bot/command_handler.py
 import re
 from .storage import (
     add_track, remove_track, list_tracks,
     add_warn, get_warns, clear_warns,
-    add_ban, remove_ban, is_banned,
-    list_all_tracks, update_last
+    add_ban, remove_ban, is_banned
 )
 from .deepseek_ai import ask_ai
 from .permissions import is_admin
-from .utils import normalize_url, detect_type, extract_thread_id
+from .utils import normalize_url, detect_type
 import sqlite3
 import os
-import time
 
 DB = os.path.join(os.path.dirname(os.path.dirname(__file__)), "bot_data.db")
 
 class CommandHandler:
     def __init__(self, vk):
-        """
-        vk — объект VKBot с полями:
-          - api (vk api)
-          - send(peer_id, text)
-          - trigger_check()
-        """
         self.vk = vk
 
     def handle(self, text: str, peer_id: int, user_id: int):
@@ -32,10 +24,9 @@ class CommandHandler:
         parts = txt.split(maxsplit=1)
         cmd = parts[0].lower()
 
-        # Авто-кик если в бан-листе (только для бесед)
+        # auto-kick if banned (in chats)
         try:
             if is_banned(peer_id, user_id):
-                # если в беседе — кикаем
                 if peer_id and peer_id > 2000000000:
                     try:
                         chat_id = peer_id - 2000000000
@@ -46,7 +37,6 @@ class CommandHandler:
         except Exception:
             pass
 
-        # ===== TRACK =====
         if cmd == "/track":
             if len(parts) < 2:
                 self.vk.send(peer_id, "Использование: /track <url>")
@@ -60,7 +50,6 @@ class CommandHandler:
             self.vk.send(peer_id, f"✅ Добавил отслеживание ({typ}): {url}")
             return
 
-        # ===== UNTRACK =====
         if cmd == "/untrack":
             if len(parts) < 2:
                 self.vk.send(peer_id, "Использование: /untrack <url>")
@@ -70,33 +59,24 @@ class CommandHandler:
             self.vk.send(peer_id, f"🗑 Убрано отслеживание: {url}")
             return
 
-        # ===== LIST =====
         if cmd == "/list":
             rows = list_tracks(peer_id)
             if not rows:
                 self.vk.send(peer_id, "Нет отслеживаемых ссылок.")
                 return
-            lines = []
-            for r in rows:
-                url, typ, last = r
-                lines.append(f"{url} ({typ}) last: {last}")
+            lines = [f"{r[0]} ({r[1]}) last: {r[2]}" for r in rows]
             self.vk.send(peer_id, "📌 Отслеживаемые:\n" + "\n".join(lines))
             return
 
-        # ===== CHECK =====
         if cmd == "/check":
             self.vk.send(peer_id, "⏳ Запускаю принудительную проверку...")
-            try:
-                ok = self.vk.trigger_check()
-                if ok:
-                    self.vk.send(peer_id, "✅ Проверка запущена.")
-                else:
-                    self.vk.send(peer_id, "❌ Ошибка при запуске проверки.")
-            except Exception as e:
-                self.vk.send(peer_id, f"Ошибка: {e}")
+            ok = self.vk.trigger_check()
+            if ok:
+                self.vk.send(peer_id, "✅ Проверка запущена.")
+            else:
+                self.vk.send(peer_id, "❌ Ошибка при запуске проверки.")
             return
 
-        # ===== AI =====
         if cmd == "/ai":
             if len(parts) < 2:
                 self.vk.send(peer_id, "Использование: /ai <текст>")
@@ -106,13 +86,11 @@ class CommandHandler:
             self.vk.send(peer_id, ans)
             return
 
-        # ===== ADMIN BLOCK =====
         admin_cmds = ("/kick", "/ban", "/unban", "/mute", "/unmute", "/warn", "/warns", "/clearwarns", "/stats")
         if cmd in admin_cmds and not is_admin(self.vk.api, peer_id, user_id):
             self.vk.send(peer_id, "❌ У вас нет прав для этой команды.")
             return
 
-        # ----- KICK -----
         if cmd == "/kick":
             if len(parts) < 2:
                 self.vk.send(peer_id, "Использование: /kick <user>")
@@ -129,14 +107,12 @@ class CommandHandler:
                 self.vk.send(peer_id, f"Ошибка kick: {e}")
             return
 
-        # ----- BAN -----
         if cmd == "/ban":
             if len(parts) < 2:
                 self.vk.send(peer_id, "Использование: /ban <user>")
                 return
             uid = self._parse_user(parts[1])
             add_ban(peer_id, uid)
-            # попытаться кикнуть сейчас
             if peer_id > 2000000000:
                 try:
                     chat_id = peer_id - 2000000000
@@ -146,7 +122,6 @@ class CommandHandler:
             self.vk.send(peer_id, f"🚫 Пользователь {uid} забанен в этой беседе.")
             return
 
-        # ----- UNBAN -----
         if cmd == "/unban":
             if len(parts) < 2:
                 self.vk.send(peer_id, "Использование: /unban <user>")
@@ -156,18 +131,14 @@ class CommandHandler:
             self.vk.send(peer_id, f"✅ Пользователь {uid} разбанен.")
             return
 
-        # ----- MUTE/UNMUTE (VK has different API perms; we try basic approach) -----
         if cmd == "/mute":
-            # usage: /mute <user> <seconds>
             if len(parts) < 2:
                 self.vk.send(peer_id, "Использование: /mute <user> <sec>")
                 return
             args = parts[1].split()
             uid = self._parse_user(args[0])
             sec = int(args[1]) if len(args) > 1 and args[1].isdigit() else 600
-            # Try to call messages.editChat? VK doesn't have direct mute by API for chat; we can set restrictions only for community moderators via conversations.setConversation? left as placeholder
             try:
-                # Placeholder: just send feedback
                 self.vk.send(peer_id, f"🔇 Пользователь {uid} замьючен на {sec} сек (симуляция).")
             except Exception as e:
                 self.vk.send(peer_id, f"Ошибка mute: {e}")
@@ -181,7 +152,6 @@ class CommandHandler:
             self.vk.send(peer_id, f"🔊 Пользователь {uid} размьючен (симуляция).")
             return
 
-        # ----- WARN -----
         if cmd == "/warn":
             if len(parts) < 2:
                 self.vk.send(peer_id, "Использование: /warn <user>")
@@ -192,7 +162,6 @@ class CommandHandler:
             self.vk.send(peer_id, f"⚠️ {uid} получил предупреждение. Всего: {cnt}")
             return
 
-        # ----- WARNS -----
         if cmd == "/warns":
             if len(parts) < 2:
                 self.vk.send(peer_id, "Использование: /warns <user>")
@@ -202,7 +171,6 @@ class CommandHandler:
             self.vk.send(peer_id, f"Предупреждений у {uid}: {cnt}")
             return
 
-        # ----- CLEARWARNS -----
         if cmd == "/clearwarns":
             if len(parts) < 2:
                 self.vk.send(peer_id, "Использование: /clearwarns <user>")
@@ -212,9 +180,7 @@ class CommandHandler:
             self.vk.send(peer_id, f"Предупреждения у {uid} очищены.")
             return
 
-        # ----- STATS -----
         if cmd == "/stats":
-            # Соберём простую статистику по БД
             try:
                 conn = sqlite3.connect(DB)
                 cur = conn.cursor()
@@ -236,7 +202,6 @@ class CommandHandler:
                 self.vk.send(peer_id, f"Ошибка получения статистики: {e}")
             return
 
-        # HELP
         if cmd == "/help":
             self.vk.send(peer_id,
                 "/track <url>\n/untrack <url>\n/list\n/check\n/ai <text>\n"
@@ -244,16 +209,9 @@ class CommandHandler:
                 "/warn <id>\n/warns <id>\n/clearwarns <id>\n/stats")
             return
 
-        # Unknown command
         self.vk.send(peer_id, "Неизвестная команда. Напиши /help")
 
     def _parse_user(self, s):
-        """
-        Парсит строки вида:
-          - id123456
-          - 123456
-          - @screenname (VK screenname -> не обрабатываем, возвращаем 0)
-        """
         if not s:
             return 0
         s = s.strip()
