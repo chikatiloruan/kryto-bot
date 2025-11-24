@@ -5,6 +5,25 @@ from urllib.parse import urlparse, parse_qs
 from typing import Optional
 import traceback
 
+def extract_post_id_from_anchor(node) -> str:
+    """
+    Извлекает ID поста из HTML-узла сообщения (article.message или похожего)
+    Обычно берется из атрибута id или data-post-id
+    """
+    if not node:
+        return ""
+    # Попытка взять id поста из id узла вида "post-12345"
+    node_id = node.get("id", "")
+    m = re.search(r'post-(\d+)', node_id)
+    if m:
+        return m.group(1)
+    # Попытка взять из data-post-id
+    data_pid = node.get("data-post-id")
+    if data_pid:
+        return str(data_pid)
+    return ""
+
+
 def log_info(msg: str):
     print(f"[UTILS] {msg}", file=sys.stderr)
 
