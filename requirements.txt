@@ -1,5 +1,5 @@
-vk_api==11.9.9
-requests==2.31.0
-beautifulsoup4==4.12.2
-aiohttp==3.8.4
-python-dotenv==1.0.0
+vk_api>=11.9.9
+requests>=2.31.0
+beautifulsoup4>=4.12.2
+aiohttp>=3.8.4
+python-dotenv>=1.0.0
