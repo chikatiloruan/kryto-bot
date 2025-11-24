@@ -1,18 +1,21 @@
 # bot/storage.py
 import sqlite3
 import threading
+import os
 from typing import List, Tuple, Optional
 
-DB = "bot_data.db"
+DB = os.getenv("BOT_DB", "bot_data.db")
 _lock = threading.Lock()
 
 def _conn():
+    # ensure dir exists
     return sqlite3.connect(DB, check_same_thread=False)
 
 def init_db():
     with _lock:
         conn = _conn()
         cur = conn.cursor()
+        # tracks: peer_id, url, type, last_id
         cur.execute("""
         CREATE TABLE IF NOT EXISTS tracks (
             peer_id INTEGER NOT NULL,
@@ -34,10 +37,17 @@ def init_db():
             user_id INTEGER,
             PRIMARY KEY(peer_id, user_id)
         )""")
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts INTEGER,
+            level TEXT,
+            msg TEXT
+        )""")
         conn.commit()
         conn.close()
 
-# Tracks
+# tracks
 def add_track(peer_id: int, url: str, type_: str):
     with _lock:
         conn = _conn()
@@ -54,7 +64,7 @@ def remove_track(peer_id: int, url: str):
         conn.commit()
         conn.close()
 
-def list_tracks(peer_id: int) -> List[Tuple[str,str]]:
+def list_tracks(peer_id: int) -> List[Tuple[str, str, Optional[str]]]:
     conn = _conn()
     cur = conn.cursor()
     cur.execute("SELECT url, type, last_id FROM tracks WHERE peer_id=?", (peer_id,))
@@ -62,7 +72,7 @@ def list_tracks(peer_id: int) -> List[Tuple[str,str]]:
     conn.close()
     return rows
 
-def list_all_tracks():
+def list_all_tracks() -> List[Tuple[int, str, str, Optional[str]]]:
     conn = _conn()
     cur = conn.cursor()
     cur.execute("SELECT peer_id, url, type, last_id FROM tracks")
@@ -78,7 +88,7 @@ def update_last(peer_id: int, url: str, last_id: str):
         conn.commit()
         conn.close()
 
-# Warns
+# warns
 def add_warn(peer_id: int, user_id: int):
     with _lock:
         conn = _conn()
@@ -104,7 +114,7 @@ def clear_warns(peer_id: int, user_id: int):
         conn.commit()
         conn.close()
 
-# Bans
+# bans
 def add_ban(peer_id: int, user_id: int):
     with _lock:
         conn = _conn()
@@ -128,3 +138,15 @@ def is_banned(peer_id: int, user_id: int) -> bool:
     r = cur.fetchone()
     conn.close()
     return bool(r)
+
+# logs
+def log_write(level: str, msg: str):
+    try:
+        with _lock:
+            conn = _conn()
+            cur = conn.cursor()
+            cur.execute("INSERT INTO logs (ts, level, msg) VALUES (strftime('%s','now'), ?, ?)", (level, msg))
+            conn.commit()
+            conn.close()
+    except Exception:
+        pass
