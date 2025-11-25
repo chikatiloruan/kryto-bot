@@ -5,23 +5,38 @@ from urllib.parse import urlparse, parse_qs
 from typing import Optional
 import traceback
 
-def extract_post_id_from_anchor(node) -> str:
+def extract_post_id_from_article(article_html: str) -> str:
     """
-    Извлекает ID поста из HTML-узла сообщения (article.message или похожего)
-    Обычно берется из атрибута id или data-post-id
+    Извлекает ID поста из HTML статьи:
+    - <article data-content="post-123456">
+    - <article data-message-id="123456">
+    - <article id="js-post-123456">
     """
-    if not node:
+    if not article_html:
         return ""
-    # Попытка взять id поста из id узла вида "post-12345"
-    node_id = node.get("id", "")
-    m = re.search(r'post-(\d+)', node_id)
+
+    # Ищем pattern data-message-id="12345"
+    m = re.search(r'data-message-id=["\'](\d+)["\']', article_html)
     if m:
         return m.group(1)
-    # Попытка взять из data-post-id
-    data_pid = node.get("data-post-id")
-    if data_pid:
-        return str(data_pid)
+
+    # Ищем data-content="post-12345"
+    m = re.search(r'data-content=["\']post-(\d+)["\']', article_html)
+    if m:
+        return m.group(1)
+
+    # Ищем id="js-post-12345"
+    m = re.search(r'id=["\']js-post-(\d+)["\']', article_html)
+    if m:
+        return m.group(1)
+
+    # fallback — ищем любые числа в article, но осторожно
+    m = re.search(r'post[-_]?(\\d+)', article_html)
+    if m:
+        return m.group(1)
+
     return ""
+
 
 
 def log_info(msg: str):
