@@ -92,16 +92,52 @@ def parse_forum_topics(html: str, page_url: str) -> List[Dict]:
     return out
 
 class ForumTracker:
-    def __init__(self, vk):
-        self.vk = vk
+      def __init__(self, *args):
+        """
+        Поддерживает два формата:
+        1) Новый:
+            ForumTracker(vk)
+        2) Старый (как в main.py):
+            ForumTracker(XF_USER, XF_TFA_TRUST, XF_SESSION, vk)
+        """
+
         self.interval = POLL
         self._running = False
         self._worker = None
-        # trigger from vk bot (/check)
-        self.vk.set_trigger(self.force_check)
-        # keepalive thread to ping FORUM_BASE to keep session alive
         self._keepalive_running = True
-        self._keepalive_thread = threading.Thread(target=self._keepalive_loop, daemon=True)
+
+        # ----- НОВЫЙ ФОРМАТ -----
+        # ForumTracker(vk)
+        if len(args) == 1:
+            self.vk = args[0]
+
+        # ----- СТАРЫЙ ФОРМАТ -----
+        # ForumTracker(XF_USER, XF_TFA_TRUST, XF_SESSION, vk)
+        elif len(args) == 4:
+            xf_user, xf_tfa_trust, xf_session, vk = args
+
+            # Переопределяем глобальные переменные config для build_cookies()
+            globals()["XF_USER"] = xf_user
+            globals()["XF_TFA_TRUST"] = xf_tfa_trust
+            globals()["XF_SESSION"] = xf_session
+
+            self.vk = vk
+
+        else:
+            raise TypeError(
+                "ForumTracker expected args: (vk) OR (XF_USER, XF_TFA_TRUST, XF_SESSION, vk)"
+            )
+
+        # Привязка /check
+        try:
+            self.vk.set_trigger(self.force_check)
+        except:
+            pass
+
+        # Запускаем поток вечного онлайна
+        self._keepalive_thread = threading.Thread(
+            target=self._keepalive_loop, daemon=True
+        )
         self._keepalive_thread.start()
 
     def start(self):
