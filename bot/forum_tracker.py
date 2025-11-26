@@ -316,3 +316,20 @@ class ForumTracker:
                 return {"ok": False, "error": f"HTTP {r.status_code}", "response": r.text[:1000]}
         except Exception as e:
             return {"ok": False, "error": f"Post error: {e}"}
+
+def stay_online_loop():
+    """
+    Постоянно поддерживает активность аккаунта на форуме,
+    отправляя запрос на главную страницу с куками.
+    """
+    cookies = build_cookies()
+    url = FORUM_BASE  # главная форума или профиль
+
+    while True:
+        try:
+            requests.get(url, cookies=cookies, timeout=10)
+            print("[ONLINE] Активность обновлена")
+        except Exception as e:
+            print("[ONLINE ERROR]", e)
+
+        time.sleep(180)  # каждые 3 минуты (можно уменьшить до 120)
