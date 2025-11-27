@@ -500,3 +500,29 @@ class ForumTracker:
             "normal_err": last_normal_err,
             "multipart_err": last_multi_err
         }
+# ======================================================================
+#  ОСТАВАТЬСЯ ОНЛАЙН (ФУНКЦИЯ ДЛЯ main.py)
+# ======================================================================
+
+def stay_online_loop():
+    """
+    Каждые 3 минуты пингуем форум, чтобы аккаунт был 'Онлайн'.
+    """
+    import requests
+    from .forum_tracker import build_cookies, FORUM_BASE
+    import time
+
+    cookies = build_cookies()
+    url = FORUM_BASE or ""
+
+    if not url:
+        print("[ONLINE] FORUM_BASE пустой — keepalive выключен")
+        return
+
+    while True:
+        try:
+            requests.get(url, cookies=cookies, timeout=10)
+            print("[ONLINE] ping OK")
+        except Exception as e:
+            print("[ONLINE ERROR]", e)
+        time.sleep(180)
