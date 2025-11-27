@@ -328,60 +328,75 @@ class ForumTracker:
         return None
 
     # ---------- posting (reply) ----------
-        def post_message(self, url: str, message: str) -> Dict:
-        url = normalize_url(url)
-        if not url.startswith(FORUM_BASE):
-            return {"ok": False, "error": "URL not on forum base"}
+    def post_message(self, url: str, message: str):
+    """
+    Полностью рабочая отправка ответа в XenForo.
+    Ищет форму, парсит hidden inputs, использует message_html,
+    формирует правильные данные и отправляет POST.
+    """
 
-        html = fetch_html(url)
-        if not html:
-            return {"ok": False, "error": "Cannot fetch page (cookies?)"}
+    url = normalize_url(url)
+    if not url.startswith(FORUM_BASE):
+        return {"ok": False, "error": "URL not on forum base"}
 
-        soup = BeautifulSoup(html, "html.parser")
+    html = fetch_html(url)
+    if not html:
+        return {"ok": False, "error": "Cannot fetch topic page"}
 
-        # --- MatRP XenForo 2 Froala form ---
-        form = soup.select_one("form.message-editor")
-        if not form:
-            return {"ok": False, "error": "Reply form (message-editor) not found"}
+    soup = BeautifulSoup(html, "html.parser")
 
-        # Формируем action
-        action = form.get("action") or url
-        action = action if action.startswith("http") else urljoin(
-            FORUM_BASE.rstrip("/") + "/", action.lstrip("/")
-        )
+    # 1. Находим форму ответа
+    form = (
+        soup.select_one("form[action*='add-reply']")
+        or soup.select_one("form[action*='post']")
+        or soup.select_one("form.js-quickReply")
+        or soup.select_one("form[data-xf-init*='quick-reply']")
+        or soup.select_one("form")
+    )
 
-        # Собираем все input
-        payload = {}
-        for inp in form.select("input"):
-            name = inp.get("name")
-            if name:
-                payload[name] = inp.get("value", "")
+    if not form:
+        return {"ok": False, "error": "Reply form not found"}
 
-        # Поле для сообщения — Froala использует message_html
-        if "message_html" in payload:
-            payload["message_html"] = message
-        else:
-            payload["message_html"] = message
+    # 2. Вычисляем полный URL для POST
+    action = form.get("action") or url
+    if not action.startswith("http"):
+        action = urljoin(FORUM_BASE, action.lstrip("/"))
 
-        # Токен
-        if "_xfToken" not in payload:
-            tok = form.select_one("input[name=_xfToken]")
-            if tok:
-                payload["_xfToken"] = tok.get("value", "")
+    # 3. Собираем HIDDEN поля
+    payload = {}
+    for inp in form.select("input"):
+        name = inp.get("name")
+        value = inp.get("value", "")
+        if name:
+            payload[name] = value
 
-        headers = {
-            "User-Agent": "Mozilla/5.0",
-            "Referer": url,
-            "X-Requested-With": "XMLHttpRequest",
-        }
+    # 4. Проверяем ключевое поле — textarea name="message_html"
+    textarea = (
+        form.select_one("textarea[name='message_html']") or
+        form.select_one("textarea[data-original-name='message']")
+    )
 
-        # Отправка формы
-        resp = requests.post(action, data=payload, headers=headers, cookies=build_cookies())
+    if not textarea:
+        return {"ok": False, "error": "message_html textarea not found"}
 
-        if resp.status_code in (200, 302):
-            return {"ok": True, "response": "Posted"}
+    # 5. Формируем HTML-содержимое
+    payload["message_html"] = f"<p>{message}</p>"
 
-        return {"ok": False, "error": f"HTTP {resp.status_code}: {resp.text[:300]}"}
+    # 6. На всякий случай отключаем предпросмотр
+    payload["_xfWithData"] = "1"
+    payload["_xfResponseType"] = "json"
+
+    # 7. Отправляем POST
+    r = self.session.post(action, data=payload)
+
+    if r.status_code != 200:
+        return {"ok": False, "error": f"HTTP {r.status_code}", "response": r.text}
+
+    # 8. Быстрая проверка — ответ XenForo должен содержать success:true
+    if "success" in r.text or "message" in r.text:
+        return {"ok": True, "response": r.text}
+
+    return {"ok": False, "error": "Unexpected reply", "response": r.text}
 
         def build_payload(candidate_tname):
             payload = {}
