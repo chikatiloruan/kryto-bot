@@ -296,6 +296,48 @@ class ForumTracker:
 
         # start keepalive thread
         threading.Thread(target=self._keepalive_loop, daemon=True).start()
+        
+    # -----------------------------------------------------------------
+    # Утилиты доступа к сети через session (чтобы все запросы шли с
+    # одинаковыми cookies и заголовками)
+    # -----------------------------------------------------------------
+    def fetch_html(self, url: str, timeout: int = 15) -> str:
+        """
+        Загрузить HTML используя self.session (с куками, которые уже были
+        установлены в session). Возвращает текст страницы или пустую строку.
+        """
+        if not url:
+            return ""
+
+        # приводим url к нормальной форме (если нужно)
+        try:
+            url = normalize_url(url)
+        except Exception:
+            pass
+
+        debug(f"[FETCH] GET {url}")
+        try:
+            # используем session.get (чтобы отправлять куки и держать сессию)
+            r = self.session.get(url, timeout=timeout)
+            debug(f"[FETCH] {url} -> {r.status_code}")
+            if r.status_code == 200:
+                return r.text
+            warn(f"HTTP {r.status_code} for {url}")
+            return ""
+        except Exception as e:
+            warn(f"fetch_html error: {e}")
+            return ""
+
+    def get(self, url: str, **kwargs):
+        """
+        Прокси-метод для self.session.get — нужен, если где-то вызывают
+        self.tracker.get(...)
+        """
+        try:
+            return self.session.get(url, **kwargs)
+        except Exception as e:
+            warn(f"session.get error: {e}")
+            raise
 
     # --- API control ---
     def start(self):
