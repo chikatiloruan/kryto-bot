@@ -72,16 +72,42 @@ def is_forum_domain(url: str, forum_base: str) -> bool:
 
 def detect_type(url: str) -> str:
     """
-    Возвращает 'thread' | 'forum' | 'unknown'
+    Определяет тип страницы MatRP:
+      thread  — тема
+      forum   — раздел
+      members — список пользователей
+      unknown — остальное
     """
     if not url:
         return "unknown"
+
     u = url.lower()
-    if "/threads/" in u or "threads=" in u or "/posts/" in u:
+
+    # ---- темы ----
+    if "/threads/" in u:
         return "thread"
-    if "/forums/" in u or "forums=" in u:
+    if "index.php?threads=" in u:
+        return "thread"
+    if "threads=" in u:
+        return "thread"
+    if "/posts/" in u:
+        return "thread"
+
+    # ---- форумы (разделы) ----
+    if "/forums/" in u:
         return "forum"
-    return "unknown"
+    if "index.php?forums=" in u:
+        return "forum"
+    if "forums=" in u:
+        return "forum"
+
+    # ---- участники ----
+    if "/members/" in u:
+        return "members"
+
+    # по умолчанию лучше считать темой
+    return "thread"
+
 
 def extract_thread_id(url: str) -> str:
     """
