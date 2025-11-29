@@ -78,10 +78,13 @@ class CommandHandler:
             if cmd == "/otvet":
                 return self.cmd_otvet(peer_id, parts)
 
+
             # 🔥🔥🔥 НОВАЯ КОМАНДА DEBUG — ДОБАВЛЕНО
             if cmd == "/debug_otvet":
                 return self.cmd_debug_otvet(peer_id, parts)
-            # -------------------------------------------------
+        # 🔥 NEW: Проверка куков
+            if cmd == "/checkcookies":
+                return self.cmd_checkcookies(peer_id)
 
             # --- админ команды ---
             admin_cmds = (
@@ -131,6 +134,21 @@ class CommandHandler:
                     self.vk.send(peer_id, ch)
         except Exception as e:
             return self.vk.send(peer_id, f"❌ Ошибка debug: {e}")
+
+       
+    def cmd_checkcookies(self, peer_id):
+        r = self.forum.check_cookies()
+
+        msg = (
+            "🔍 Проверка cookies\n"
+            f"Статус: {r.get('status')}\n"
+            f"Авторизация: {r.get('logged_in')}\n\n"
+            f"Cookies:\n{r.get('cookies_sent')}\n\n"
+            f"HTML:\n{r.get('html_sample')}"
+        )
+
+        self.vk.send(peer_id, msg)
+
 
     # ---------------------------------------------------------
     #               ВСЕ ОСТАЛЬНЫЕ КОМАНДЫ (как были)
