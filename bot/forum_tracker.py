@@ -244,12 +244,12 @@ class ForumTracker:
     def start(self):
         self._running = True
         threading.Thread(target=self._loop, daemon=True).start()
-        log(f"ForumTracker started (interval={self.interval})")
+        log_info(f"ForumTracker started (interval={self.interval})")
 
     def stop(self):
         self._running = False
         self._keepalive_running = False
-        log("ForumTracker stopped")
+        log_info("ForumTracker stopped")
 
     def force_check(self):
         threading.Thread(target=self.check_all, daemon=True).start()
