@@ -382,7 +382,84 @@ class ForumTracker:
                 except:
                     pass
 
-     
+
+        # ===================================================================
+    #  РУЧНАЯ ЗАГРУЗКА ВСЕХ ПОСТОВ (для /checkfa) — FIXED
+    # ===================================================================
+    def manual_fetch_posts(self, url: str):
+        url = normalize_url(url)
+
+        debug(f"[manual_fetch_posts] URL = {url}")
+        debug(f"[manual_fetch_posts] Cookies = {build_cookies()}")
+
+        if not url.startswith(FORUM_BASE):
+            return {"ok": False, "error": "URL outside FORUM_BASE"}
+
+        html = fetch_html(url)
+        if not html:
+            return {"ok": False, "error": "Cannot fetch page"}
+
+        posts = parse_thread_posts(html, url)
+
+        debug(f"[manual_fetch_posts] Parsed posts = {len(posts)}")
+
+        return {"ok": True, "posts": posts}
+
+    # ===================================================================
+    # DEBUG: что бот видит на странице — FIXED
+    # ===================================================================
+    def debug_reply_form(self, url: str):
+        url = normalize_url(url)
+        html = fetch_html(url)
+
+        cookies = build_cookies()
+
+        if not html:
+            return (
+                "❌ Не удалось загрузить страницу\n"
+                f"Cookies: {cookies}"
+            )
+
+        soup = BeautifulSoup(html, "html.parser")
+
+        form = (
+            soup.select_one("form[action*='add-reply']") or
+            soup.select_one("form.js-quickReply") or
+            soup.select_one("form[data-xf-init*='quick-reply']") or
+            soup.select_one("form[action*='post']")
+        )
+
+        textarea = None
+        if form:
+            textarea = (
+                form.select_one("textarea[name='message_html']") or
+                form.select_one("textarea[name='message']") or
+                form.select_one("textarea")
+            )
+
+        logged = (
+            "LogOut" in html or 
+            "Выйти" in html or 
+            "account" in html or
+            "data-xf-init=\"member-tooltip\"" in html
+        )
+
+        return (
+            "🔍 DEBUG REPLY FORM\n"
+            f"✔ Logged in: {logged}\n"
+            f"✔ Cookies OK: {bool(cookies)}\n"
+            f"✔ Form found: {bool(form)}\n"
+            f"✔ Textarea found: {bool(textarea)}\n"
+            f"✔ Textarea name: {textarea.get('name') if textarea else '—'}\n"
+            f"✔ Action: {form.get('action') if form else '—'}\n"
+            "-----------------------------------\n"
+            "Cookies:\n"
+            f"{cookies}\n"
+            "-----------------------------------\n"
+            "HTML снизу страницы:\n"
+            + html[-2000:]
+        )
+        
     # ===================================================================
     #  ОТПРАВКА СООБЩЕНИЙ В ТЕМУ (полностью исправлено)
     # ===================================================================
