@@ -394,6 +394,46 @@ class ForumTracker:
                     self.vk.send(peer_id, s)
                 except:
                     pass
+
+        # ===================================================================
+    # DEBUG: показать, что бот видит на странице
+    # ===================================================================
+    def debug_reply_form(self, url: str):
+        url = normalize_url(url)
+        html = fetch_html(url)
+
+        if not html:
+            return "❌ Не удалось загрузить страницу"
+
+        soup = BeautifulSoup(html, "html.parser")
+
+        form = (
+            soup.select_one("form[action*='add-reply']")
+            or soup.select_one("form.js-quickReply")
+            or soup.select_one("form[data-xf-init*='quick-reply']")
+            or soup.select_one("form[action*='post']")
+        )
+
+        textarea = None
+        if form:
+            textarea = form.select_one("textarea") or form.select_one("textarea[name]")
+
+        # проверяем залогиненность
+        logged = "LogOut" in html or "Выйти" in html or "account" in html
+
+        # собираем инфу
+        return (
+            "🔍 DEBUG REPLY FORM\n"
+            f"✔ Logged in: {logged}\n"
+            f"✔ Form found: {bool(form)}\n"
+            f"✔ Textarea found: {bool(textarea)}\n"
+            f"✔ Textarea name: {textarea.get('name') if textarea else '—'}\n"
+            f"✔ Action: {form.get('action') if form else '—'}\n"
+            "-----------------------------------\n"
+            "HTML снизу страницы:\n"
+            + html[-2000:]
+        )
+
     # ===================================================================
     #  ОТПРАВКА СООБЩЕНИЙ В ТЕМУ (полностью исправлено)
     # ===================================================================
