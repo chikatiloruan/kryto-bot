@@ -60,6 +60,7 @@ def build_cookies() -> dict:
         "xf_user": globals().get("XF_USER", XF_USER) or "",
         "xf_session": globals().get("XF_SESSION", XF_SESSION) or "",
         "xf_tfa_trust": globals().get("XF_TFA_TRUST", XF_TFA_TRUST) or "",
+        "xf_csrf": globals().get("XF_CSRF", XF_CSRF) or "",
     }
 
 def fetch_html(url: str, timeout: int = 15) -> str:
