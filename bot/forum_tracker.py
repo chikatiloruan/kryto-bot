@@ -462,11 +462,11 @@ class ForumTracker:
         )
         
 
-def post_message(self, url: str, message: str):
-    """
-    Полностью исправленная отправка ответа в тему MatRP (XenForo 2.3).
-    Работает на всех темах, включая новые, старые и приватные.
-    """
+ def post_message(self, url: str, message: str):
+     """
+     Полностью исправленная отправка ответа в тему MatRP (XenForo 2.3).
+     Работает на всех темах, включая новые, старые и приватные.
+     """
 
     debug(f"[POST] Sending to: {url}")
 
