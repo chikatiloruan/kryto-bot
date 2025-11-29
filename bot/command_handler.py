@@ -78,6 +78,11 @@ class CommandHandler:
             if cmd == "/otvet":
                 return self.cmd_otvet(peer_id, parts)
 
+            # 🔥🔥🔥 НОВАЯ КОМАНДА DEBUG — ДОБАВЛЕНО
+            if cmd == "/debug_otvet":
+                return self.cmd_debug_otvet(peer_id, parts)
+            # -------------------------------------------------
+
             # --- админ команды ---
             admin_cmds = (
                 "/kick","/ban","/unban","/mute","/unmute",
@@ -106,6 +111,26 @@ class CommandHandler:
         except Exception as e:
             self.vk.send(peer_id, f"Ошибка: {e}")
             traceback.print_exc()
+
+    # ---------------------------------------------------------
+    # 🔍 НОВАЯ ФУНКЦИЯ DEBUG
+    # ---------------------------------------------------------
+    def cmd_debug_otvet(self, peer_id, parts):
+        if len(parts) < 2:
+            return self.vk.send(peer_id, "Использование: /debug_otvet <url>")
+
+        url = normalize_url(parts[1])
+        try:
+            res = self.tracker.debug_reply_form(url)
+            # VK ограничение 4000 символов
+            if len(res) < 3900:
+                self.vk.send(peer_id, res)
+            else:
+                chunks = [res[i:i+3800] for i in range(0, len(res), 3800)]
+                for ch in chunks:
+                    self.vk.send(peer_id, ch)
+        except Exception as e:
+            return self.vk.send(peer_id, f"❌ Ошибка debug: {e}")
 
     # ---------------------------------------------------------
     #               ВСЕ ОСТАЛЬНЫЕ КОМАНДЫ (как были)
