@@ -93,42 +93,46 @@ def fetch_html(url: str, timeout: int = 15) -> str:
 
 def parse_thread_posts(html: str, page_url: str) -> List[Dict]:
     soup = BeautifulSoup(html or "", "html.parser")
-    nodes = soup.select("article.message, article.message--post, .message, .message-body")
 
-    if not nodes:
-        nodes = soup.select(".post, .messageRow, .message-row")
+    # НАСТОЯЩИЕ посты XenForo 2.3 на MatRP
+    messages = soup.select("div.message[data-content]")
 
     out = []
-    for n in nodes:
-        try:
-            raw = str(n)
-            pid = extract_post_id_from_article(raw) or extract_thread_id(page_url) or ""
 
-            author_el = n.select_one(
-                ".message-name a, .username a, .username, "
-                ".message-userCard a, .message-author, .message-attribution a"
-            )
+    for m in messages:
+        try:
+            # ID поста
+            pid = m.get("data-content", "").replace("post-", "")
+
+            # Автор
+            author_el = m.select_one(".message-name a, .username a")
             author = author_el.get_text(strip=True) if author_el else "Неизвестно"
 
-            t = n.select_one("time")
-            date = t.get("datetime") if t else "Неизвестно"
+            # Дата/время
+            time_el = m.select_one("time")
+            date = time_el.get("datetime", "") if time_el else "Неизвестно"
 
-            body = n.select_one(".bbWrapper, .message-body, .message-content, .postMessage")
+            # Текст
+            body = m.select_one(".bbWrapper")
             text = body.get_text("\n", strip=True) if body else ""
 
-            link = page_url + (f"#post-{pid}" if pid else "")
+            # Ссылка
+            link = f"{page_url}#post-{pid}"
 
             out.append({
-                "id": str(pid),
+                "id": pid,
                 "author": author,
                 "date": date,
                 "text": text,
                 "link": link
             })
+
         except Exception as e:
             warn(f"parse_thread_posts error: {e}")
             continue
+
     return out
+
 
 
 def parse_forum_topics(html: str, page_url: str) -> List[Dict]:
