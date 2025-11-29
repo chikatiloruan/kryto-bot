@@ -153,34 +153,79 @@ def parse_thread_posts(html: str, page_url: str) -> List[Dict]:
     return out
 
 
-def parse_forum_topics(html: str, page_url: str) -> List[Dict]:
-    """
-    Parse forum section page and return list of topics:
-    each topic: {tid, title, author, url}
-    """
-    soup = BeautifulSoup(html or "", "html.parser")
-    items = soup.select(".structItem--thread, .structItem, .discussionListItem, .threadbit, .structItem-title")
+def parse_forum_topics(html: str, base_url: str):
+    soup = BeautifulSoup(html, "html.parser")
 
-    out: List[Dict] = []
-    for it in items:
+    out = []
+
+    # -----------------------------------------------------
+    # 1) PINNED (закреплённые)
+    # -----------------------------------------------------
+    pinned_blocks = soup.select(".uix_stickyContainerOuter.is-active .structItem")
+
+    # -----------------------------------------------------
+    # 2) REGULAR (обычные)
+    # -----------------------------------------------------
+    regular_blocks = soup.select(".uix_stickyContainerInner .structItem")
+
+    # --- Функция парсинга одного блока ---
+    def parse_item(it, pinned=False):
+        # ID темы
+        tid = (
+            it.get("data-lb-id")
+            or it.get("data-thread-id")
+            or it.get("data-content-id")
+            or None
+        )
+
+        # Если ID нет — пробуем через ссылку
+        if not tid:
+            a = it.select_one("a.structItem-title")
+            if a:
+                tid = extract_thread_id(a.get("href"))
+
         try:
-            a = it.select_one(".structItem-title a, a[href*='/threads/'], a[href*='index.php?threads='], a.thread-title, a.topic-title")
-            if not a:
-                a = it.select_one("a")
-                if not a:
-                    continue
-            href = a.get("href") or ""
-            full = href if href.startswith("http") else urljoin((FORUM_BASE.rstrip("/") + "/"), href.lstrip("/"))
-            tid = extract_thread_id(full) or ""
-            title = a.get_text(strip=True)
-            author_node = it.select_one(".structItem-minor a, .username, .structItem-lastPoster a, .lastPoster, .poster")
-            author = author_node.get_text(strip=True) if author_node else "Неизвестно"
-            out.append({"tid": str(tid or ""), "title": title, "author": author, "url": full})
-        except Exception as e:
-            warn(f"parse_forum_topics item error: {e}")
-            traceback.print_exc()
-            continue
+            tid = int(tid)
+        except:
+            return None
+
+        # Ссылка
+        a = it.select_one("a.structItem-title")
+        if not a:
+            return None
+
+        href = a.get("href", "")
+        url = href if href.startswith("http") else FORUM_BASE + href
+
+        # Название
+        title = a.get_text(strip=True)
+
+        # Автор
+        author_el = it.select_one(".username, .structItem-parts .username")
+        author = author_el.get_text(strip=True) if author_el else "Unknown"
+
+        return {
+            "tid": tid,
+            "title": title,
+            "author": author,
+            "url": url,
+            "pinned": pinned
+        }
+
+    # --- Обрабатываем все pinned ---
+    for block in pinned_blocks:
+        item = parse_item(block, pinned=True)
+        if item:
+            out.append(item)
+
+    # --- Обрабатываем все обычные ---
+    for block in regular_blocks:
+        item = parse_item(block, pinned=False)
+        if item:
+            out.append(item)
+
     return out
+
 
 # ======================================================================
 #  ForumTracker class
