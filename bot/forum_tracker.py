@@ -461,7 +461,7 @@ class ForumTracker:
         )
         
 
-     def post_message(self, url: str, message: str):
+    def post_message(self, url: str, message: str):
         """
         Новая улучшенная отправка сообщения в тему.
         Поддерживает:
