@@ -5,6 +5,37 @@ from urllib.parse import urlparse, parse_qs
 from typing import Optional
 import traceback
 
+import requests
+from config import FORUM_BASE
+
+HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/124.0.0.0 Safari/537.36"
+    )
+}
+
+def fetch_html(url: str) -> str | None:
+    """
+    Скачивает HTML страницу без авторизации.
+    Используется в /tlist, /tlistall и parsing форумов.
+    """
+    try:
+        url = normalize_url(url)
+        r = requests.get(url, headers=HEADERS, timeout=10)
+
+        if r.status_code != 200:
+            log_error(f"HTTP {r.status_code} for {url}")
+            return None
+
+        return r.text
+
+    except Exception as e:
+        log_error(f"fetch_html failed: {e}")
+        return None
+
+
 def extract_post_id_from_article(article_html: str) -> str:
     """
     Извлекает ID поста из HTML статьи:
