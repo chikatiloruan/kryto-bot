@@ -409,48 +409,6 @@ class ForumTracker:
     # DEBUG: что бот видит на странице — FIXED
     # ===================================================================
 
-    def check_cookies(self):
-    """
-    Полная проверка авторизации через cookies.
-    Возвращает True если бот реально залогинен на форуме.
-    """
-
-    test_url = FORUM_BASE + "/index.php"
-    
-    headers = {
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/122.0.0.0 Safari/537.36"
-        )
-    }
-
-    # cookies, которые ты используешь
-    cookies = {
-        "xf_user": XF_USER,
-        "xf_session": XF_SESSION,
-        "xf_tfa_trust": XF_TFA_TRUST
-    }
-
-    try:
-        r = self.session.get(test_url, headers=headers, cookies=cookies)
-        html = r.text
-
-        # признак авторизации — есть кнопка "Выйти"
-        logged = ("logout" in html.lower()) or ("Выйти" in html)
-
-        return {
-            "ok": True,
-            "logged_in": logged,
-            "status": r.status_code,
-            "cookies_sent": cookies,
-            "html_sample": html[:500]
-        }
-
-    except Exception as e:
-        return {"ok": False, "error": str(e)}
-
-
     def debug_reply_form(self, url: str):
         url = normalize_url(url)
         html = fetch_html(url)
@@ -648,6 +606,46 @@ class ForumTracker:
             "normal_err": normal_error,
             "multipart_err": multipart_error
         }
+     def check_cookies(self):
+        """
+        Полная проверка авторизации через cookies.
+        Возвращает True если бот реально залогинен на форуме.
+        """
+
+        test_url = FORUM_BASE + "/index.php"
+        
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/122.0.0.0 Safari/537.36"
+            )
+        }
+
+        # cookies, которые ты используешь
+        cookies = {
+            "xf_user": XF_USER,
+            "xf_session": XF_SESSION,
+            "xf_tfa_trust": XF_TFA_TRUST
+        }
+
+        try:
+            r = self.session.get(test_url, headers=headers, cookies=cookies)
+            html = r.text
+
+            # признак авторизации — есть кнопка "Выйти"
+            logged = ("logout" in html.lower()) or ("выйти" in html.lower())
+
+            return {
+                "ok": True,
+                "logged_in": logged,
+                "status": r.status_code,
+                "cookies_sent": cookies,
+                "html_sample": html[:500]
+            }
+
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
 
 
 # ======================================================================
