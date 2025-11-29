@@ -7,7 +7,7 @@ from typing import List, Dict, Optional
 from urllib.parse import urljoin
 from .utils import (
     normalize_url, detect_type,
-    extract_thread_id, extract_post_id_from_article
+    extract_thread_id, extract_post_id_from_article, log_infO, log_error
 )
 from .storage import list_all_tracks, update_last
 import traceback
