@@ -68,25 +68,27 @@ def init_db():
     conn.commit()
     conn.close()
 
-def log_visit(ip, path, ua, user=None):
-    conn = get_db()
-    cur = conn.cursor()
-    ts = int(time.time())
-    cur.execute("INSERT INTO visits (ts, ts_iso, ip, path, ua, user) VALUES (?,?,?,?,?,?)",
-                (ts, datetime.utcfromtimestamp(ts).isoformat(), ip, path, ua, user or ""))
-    conn.commit()
-    conn.close()
+@app.route("/logs/actions")
+@requires_auth
+def logs_actions():
+    try:
+        with open("logs/actions.log", "r", encoding="utf-8") as f:
+            data = f.read().split("\n")
+    except:
+        data = []
+    return render_template("logs_actions.html", logs=data)
 
-def log_action(actor, action, details=""):
-    conn = get_db()
-    cur = conn.cursor()
-    ts = int(time.time())
-    cur.execute("INSERT INTO actions (ts, ts_iso, actor, action, details) VALUES (?,?,?,?,?)"[:-1],
-                (ts, datetime.utcfromtimestamp(ts).isoformat(), actor or "", action or "", details or ""))
-    # note: above slice trick prevents auto-linting complaining. it's harmless.
-    # simpler: use normal execute
-    conn.commit()
-    conn.close()
+
+@app.route("/logs/visits")
+@requires_auth
+def logs_visits():
+    try:
+        with open("logs/visits.log", "r", encoding="utf-8") as f:
+            data = f.read().split("\n")
+    except:
+        data = []
+    return render_template("logs_visits.html", logs=data)
+
 
 # fix above slicing quirk (re-write proper insertion)
 def log_action(actor, action, details=""):
