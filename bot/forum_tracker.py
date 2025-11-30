@@ -1,4 +1,5 @@
 # bot/forum_tracker.py
+import re
 import threading
 import time
 import requests
