@@ -1,20 +1,88 @@
-<!DOCTYPE html>
-<html lang="ru">
-<head>
-    <meta charset="UTF-8">
-    <title>ForumTracker — Панель</title>
-    <link rel="stylesheet" href="/static/style.css">
-</head>
-<body class="dark">
+<!-- templates/dashboard.html -->
+{% extends "base.html" %}
+{% block content %}
+<div class="row">
+  <div class="col-md-8">
+    <div class="card bg-dark border-secondary mb-3">
+      <div class="card-body">
+        <h5>Tracks</h5>
+        <form class="row g-2" method="post" action="{{ url_for('add_track_route') }}">
+          <div class="col-md-7">
+            <input class="form-control" name="url" placeholder="Full forum URL (thread/forum)" />
+          </div>
+          <div class="col-md-3">
+            <input class="form-control" name="peer_id" placeholder="peer_id (Discord style)" />
+          </div>
+          <div class="col-md-2">
+            <button class="btn btn-success w-100">Add</button>
+          </div>
+        </form>
 
-<div class="container">
-    <h1>ForumTracker – Панель управления</h1>
+        <hr class="my-3">
 
-    <p style="margin-top:20px; opacity:0.8;">
-        Панель работает. (<b>dashboard.html загружен</b>)<br>
-        Сейчас я сделаю красивый Discord UI — скажи, если хочешь.
-    </p>
+        {% if tracks %}
+          <ul class="list-group list-group-flush">
+            {% for t in tracks %}
+              <li class="list-group-item bg-dark d-flex justify-content-between align-items-start">
+                <div>
+                  <div class="fw-bold text-white">{{ t[1] if t|length>1 else (t.title if t.title else t.url) }}</div>
+                  <div class="text-muted small">{{ t[0] if t|length>0 else '' }}</div>
+                </div>
+                <form method="post" action="{{ url_for('remove_track_route') }}">
+                  <input type="hidden" name="url" value="{{ (t[0] if t|length>1 else t.url) }}">
+                  <input type="hidden" name="peer_id" value="{{ (t[0] if t|length>0 else '') }}">
+                  <button class="btn btn-sm btn-outline-danger">Remove</button>
+                </form>
+              </li>
+            {% endfor %}
+          </ul>
+        {% else %}
+          <div class="text-muted">No tracks available</div>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="card bg-dark border-secondary mb-3">
+      <div class="card-body">
+        <h5>Recent actions</h5>
+        <table class="table table-sm table-dark">
+          <thead>
+            <tr><th>Time</th><th>Actor</th><th>Action</th><th>Details</th></tr>
+          </thead>
+          <tbody>
+            {% for a in actions %}
+              <tr>
+                <td>{{ a['ts_iso'] }}</td>
+                <td>{{ a['actor'] }}</td>
+                <td>{{ a['action'] }}</td>
+                <td style="max-width:36ch;word-break:break-all">{{ a['details'] }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="col-md-4">
+    <div class="card bg-dark border-secondary mb-3">
+      <div class="card-body">
+        <h5>Cookies (masked)</h5>
+        <pre class="small text-muted">{{ cookies }}</pre>
+        <hr>
+        <h6>Visits (last 40)</h6>
+        <ul class="list-group list-group-flush small">
+          {% for v in visits %}
+            <li class="list-group-item bg-dark"><strong>{{ v['ts_iso'] }}</strong><br>{{ v['ip'] }} → {{ v['path'] }}<br><span class="text-muted">{{ v['ua'][:60] }}</span></li>
+          {% endfor %}
+        </ul>
+        <hr>
+        <a class="btn btn-sm btn-outline-info me-1" href="{{ url_for('view_actions') }}">All actions</a>
+        <a class="btn btn-sm btn-outline-info" href="{{ url_for('view_visits') }}">All visits</a>
+        <a class="btn btn-sm btn-outline-warning" href="{{ url_for('debug') }}">Debug</a>
+      </div>
+    </div>
+  </div>
 </div>
-
-</body>
-</html>
+{% endblock %}
