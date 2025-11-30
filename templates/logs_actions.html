@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Логи действий</title>
+    <style>
+        body {
+            background: #0d0f14;
+            color: #e3e5e8;
+            font-family: "Segoe UI", sans-serif;
+            padding: 30px;
+        }
+
+        h1 {
+            font-size: 28px;
+            color: #ffffff;
+            margin-bottom: 20px;
+        }
+
+        .log-container {
+            background: #11151d;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 0 15px #00000055;
+            border: 1px solid #1f2530;
+        }
+
+        .log-item {
+            padding: 10px;
+            border-bottom: 1px solid #1f2530;
+            white-space: pre-wrap;
+        }
+
+        .log-item:last-child {
+            border: none;
+        }
+
+        a {
+            color: #5865F2;
+            text-decoration: none;
+        }
+        a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+
+<h1>📘 Логи действий</h1>
+
+<div class="log-container">
+    {% if logs %}
+        {% for item in logs %}
+            <div class="log-item">{{ item }}</div>
+        {% endfor %}
+    {% else %}
+        <div class="log-item">Нет записей.</div>
+    {% endif %}
+</div>
+
+<p style="margin-top:20px;"><a href="/">← Назад</a></p>
+
+</body>
+</html>
