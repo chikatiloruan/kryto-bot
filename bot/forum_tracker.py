@@ -583,7 +583,7 @@ class ForumTracker:
             debug(f"[POST] Normal POST code: {getattr(r, 'status_code', 'ERR')}")
             if getattr(r, "status_code", 0) in (200, 204, 302):
                 time.sleep(1)
-                check = fetch_html(url)
+                check = self.fetch_html(url)
                 if check and message.split()[0] in check:
                     return {"ok": True, "response": "posted (normal)"}
             normal_error = f"HTTP {getattr(r, 'status_code', 'ERR')}"
