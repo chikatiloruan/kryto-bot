@@ -690,94 +690,93 @@ class ForumTracker:
                 warn(f"keepalive error: {e}")
             time.sleep(max(60, self.interval * 3))
 
-    def debug_forum(self, url: str) -> str:
-    """
-    Debug helper для разделов (forums).
-    Возвращает подробный отчёт — какие селекторы проверялись,
-    сколько элементов найдено, пример HTML первого элемента и результат parse_forum_topics.
-    """
-    out_lines = []
-    try:
-        url = normalize_url(url)
-    except Exception:
-        pass
+        def debug_forum(self, url: str) -> str:
+            """
+            Debug helper для разделов (forums).
+            Возвращает подробный отчёт — какие селекторы проверялись,
+            сколько элементов найдено, пример HTML первого элемента
+            и результат parse_forum_topics.
+             """
+            out_lines = []
+            try:
+                url = normalize_url(url)
+            except Exception:
+                pass
 
-    out_lines.append(f"🔍 DEBUG FORUM\nURL: {url}\n")
+            out_lines.append(f"🔍 DEBUG FORUM\nURL: {url}\n")
 
-    # fetch page via session (uses cookies)
-    html = ""
-    try:
-        html = self.fetch_html(url)
-        if not html:
-            return "❌ Не удалось загрузить страницу. Проверь cookies / FORUM_BASE."
-    except Exception as e:
-        return f"❌ Ошибка fetch_html: {e}"
+        # fetch page
+            try:
+                html = self.fetch_html(url)
+                 if not html:
+                    return "❌ Не удалось загрузить страницу. Проверь cookies / FORUM_BASE."
+            except Exception as e:
+                return f"❌ Ошибка fetch_html: {e}"
 
-    # parse
-    soup = BeautifulSoup(html, "html.parser")
+             soup = BeautifulSoup(html, "html.parser")
 
-    # селекторы, которые мы тестируем
-    selectors = [
-        ".uix_stickyContainerOuter .structItem",
-        ".uix_stickyContainerInner .structItem",
-        ".structItemContainer-group .structItem",
-        ".block-body .structItem",
-        ".structItem",
-        ".structItem--thread",
-        ".structItem.js-threadListItem"
-    ]
+            # list of selectors to test
+            selectors = [
+                ".uix_stickyContainerOuter .structItem",
+                ".uix_stickyContainerInner .structItem",
+                ".structItemContainer-group .structItem",
+                ".block-body .structItem",
+                ".structItem",
+                ".structItem--thread",
+                ".structItem.js-threadListItem"
+            ]
 
-    out_lines.append("Селекторы и найденные количества:")
-    for sel in selectors:
-        try:
-            nodes = soup.select(sel)
-            out_lines.append(f"  {sel} -> {len(nodes)}")
-        except Exception as e:
-            out_lines.append(f"  {sel} -> ERR ({e})")
+            out_lines.append("Селекторы и найденные количества:")
+            for sel in selectors:
+                try:
+                    nodes = soup.select(sel)
+                    out_lines.append(f"  {sel} -> {len(nodes)}")
+                except Exception as e:
+                    out_lines.append(f"  {sel} -> ERR ({e})")
 
-    # покажем первые 3 найденных structItem (если есть)
-    try:
-        all_items = soup.select(".structItem")
-        out_lines.append(f"\nВсего .structItem: {len(all_items)}")
-        for i, it in enumerate(all_items[:3]):
-            snippet = str(it)[:1200].replace("\n", " ")
-            out_lines.append(f"\n--- structItem #{i+1} (truncated) ---\n{snippet}\n")
-    except Exception as e:
-        out_lines.append(f"\nОшибка при выводе structItem: {e}")
+        # show first structItems
+            try:
+                all_items = soup.select(".structItem")
+                out_lines.append(f"\nВсего .structItem: {len(all_items)}")
+                for i, it in enumerate(all_items[:3]):
+                    snippet = str(it)[:1200].replace("\n", " ")
+                    out_lines.append(f"\n--- structItem #{i+1} (truncated) ---\n{snippet}\n")
+            except Exception as e:
+                out_lines.append(f"\nОшибка при выводе structItem: {e}")
 
-    # попробуем запустить parse_forum_topics (твоя функция) и вывести результаты
-    try:
-        parsed = parse_forum_topics(html, url)
-        out_lines.append(f"\nparse_forum_topics -> found {len(parsed)} items")
-        for p in parsed[:10]:
-            out_lines.append(f"  tid={p.get('tid')} title={p.get('title')[:80]} author={p.get('author')} pinned={p.get('pinned')} url={p.get('url')}")
-    except Exception as e:
-        out_lines.append(f"\nparse_forum_topics error: {e}")
+        # run parse_forum_topics
+            try:
+                parsed = parse_forum_topics(html, url)
+                out_lines.append(f"\nparse_forum_topics -> found {len(parsed)} items")
+                for p in parsed[:10]:
+                    out_lines.append(
+                        f"  tid={p.get('tid')} title={p.get('title')[:80]} "
+                        f"author={p.get('author')} pinned={p.get('pinned')} url={p.get('url')}"
+                    )
+            except Exception as e:
+                out_lines.append(f"\nparse_forum_topics error: {e}")
 
-    # покажем часть html вокруг контейнера с threads list (поиск по class-group)
-    try:
-        area = soup.select_one(".structItemContainer-group") or soup.select_one(".block-body") or soup.select_one(".p-body")
-        if area:
-            out_lines.append("\n--- Пример HTML блока тем (truncated 2000 chars) ---")
-            out_lines.append(str(area)[:2000].replace("\n", " "))
-        else:
-            out_lines.append("\nНе найден основной контейнер (.structItemContainer-group/.block-body/.p-body).")
-    except Exception as e:
-        out_lines.append(f"\nОшибка при выводе блока тем: {e}")
+        # show container area
+            try:
+                area = (
+                    soup.select_one(".structItemContainer-group")
+                    or soup.select_one(".block-body")
+                    or soup.select_one(".p-body")
+                )
+                if area:
+                    out_lines.append("\n--- Пример HTML блока тем (truncated 2000 chars) ---")
+                    out_lines.append(str(area)[:2000].replace("\n", " "))
+                else:
+                    out_lines.append("\nНе найден основной контейнер (.structItemContainer-group/.block-body/.p-body).")
+            except Exception as e:
+                out_lines.append(f"\nОшибка при выводе блока тем: {e}")
 
-    # дополнительные подсказки
-    out_lines.append("\nПодсказки:")
-    out_lines.append(" • Если селекторы возвращают 0, проверь, не загружает ли сайт контент через JS.")
-    out_lines.append(" • Если контейнеры есть, но parse_forum_topics пуст — покажи первый structItem (выше).")
-    out_lines.append(" • Можем добавить дополнительные селекторы (например v2.3 custom classes).")
+            out_lines.append("\nПодсказки:")
+            out_lines.append(" • Если селекторы возвращают 0 — форум грузит тему через JS/Ajax.")
+            out_lines.append(" • Если structItem есть — скинь мне один блок, я напишу точные селекторы.")
+            out_lines.append(" • Если parse пустой — не совпадают классы MatRP.")
 
-    return "\n".join(out_lines)
-
-
-
-    
-
-
+            return "\n".join(out_lines)
 
 # ======================================================================
 #  stay_online_loop — helper for main.py (external use)
