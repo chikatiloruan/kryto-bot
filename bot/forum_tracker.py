@@ -86,7 +86,7 @@ def parse_thread_posts(html: str, page_url: str):
     soup = BeautifulSoup(html or "", "html.parser")
 
     # Все посты по новому формату
-    posts = soup.select("article.message-body.js-selectToQuote")
+    posts = soup.select("message-content.js-messageContent")
     out = []
 
     for msg in posts:
