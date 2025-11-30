@@ -1,0 +1,14 @@
+/* static/style.css — простой Discord-like */
+body.bg { background:#0f1113; color:#d7dde6; font-family: Inter, Roboto, sans-serif; margin:0; padding:0; }
+.topbar { background:#191a1d; padding:12px 20px; display:flex; justify-content:space-between; align-items:center; color:#e6eef6; box-shadow: 0 2px 6px rgba(0,0,0,.6); }
+.brand { font-weight:700; color:#99aaff; }
+.container { display:flex; gap:18px; padding:18px; flex-wrap:wrap; }
+.card { background:#16171a; border-radius:10px; padding:16px; min-width:320px; width: 48%; box-shadow: 0 6px 20px rgba(0,0,0,.6); }
+.panel { max-width:420px; margin:80px auto; background:#16171a; padding:20px; border-radius:10px; box-shadow: 0 6px 20px rgba(0,0,0,.6); }
+input, textarea { width:100%; padding:8px; margin:8px 0 12px; border-radius:6px; border:1px solid #2b2d31; background:#0f1113; color:#d7dde6; }
+button { background:#5865F2; color:white; border:none; padding:8px 12px; border-radius:8px; cursor:pointer; }
+.err { background:#2b1f1f; padding:8px; border-radius:6px; color:#ff9b9b; margin-bottom:8px; }
+table { width:100%; border-collapse:collapse; }
+table th, table td { padding:8px; text-align:left; border-bottom:1px solid #222327; font-size:13px; color:#c8d0da; }
+.navactions a { color:#c9d6ff; text-decoration:none; margin-left:12px; }
+pre { background:#0b0c0d; padding:10px; border-radius:6px; overflow:auto; color:#bcd; }
