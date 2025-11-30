@@ -148,50 +148,82 @@ def parse_thread_posts(html: str, page_url: str):
 
 def parse_forum_topics(html: str, base_url: str):
     soup = BeautifulSoup(html, "html.parser")
-
-    container = soup.select_one(".structItemContainer-group.js-threadList")
-    if not container:
-        return []
-
-    items = container.select(".structItem.structItem--thread")
-
     out = []
 
-    for it in items:
-        # thread-id
-        tid = it.get("data-thread-id")
+    # --- Универсальный поиск структур форума ---
+    # MatRP использует несколько возможных контейнеров
+    containers = []
+
+    # pinned + regular (старый стиль)
+    containers += soup.select(".uix_stickyContainerOuter .structItem")
+    containers += soup.select(".uix_stickyContainerInner .structItem")
+
+    # новый стиль XenForo 2.2+
+    containers += soup.select(".structItemContainer-group .structItem")
+    containers += soup.select(".block-body .structItem")
+
+    # fallback — вообще все structItem
+    if not containers:
+        containers = soup.select(".structItem")
+
+    seen_ids = set()
+
+    def parse_item(it):
+        # ID темы
+        tid = (
+            it.get("data-thread-id")
+            or it.get("data-lb-id")
+            or it.get("data-content-id")
+        )
+
+        # если ID нет — пробуем через ссылку
+        if not tid:
+            a = it.select_one("a.structItem-title")
+            if a:
+                tid = extract_thread_id(a.get("href"))
+
         try:
             tid = int(tid)
         except:
-            continue
+            return None
+        
+        if tid in seen_ids:
+            return None
+        seen_ids.add(tid)
 
-        # Основной линк (ссылка на тему)
-        a = it.select_one(".structItem-title a[href*='/threads/']")
+        # ссылка
+        a = it.select_one("a.structItem-title")
         if not a:
-            continue
+            return None
 
         href = a.get("href", "")
         url = href if href.startswith("http") else base_url + href
 
+        # название
         title = a.get_text(strip=True)
 
-        # Автор темы
-        author_el = it.select_one(".structItem-parts .username")
+        # автор
+        author_el = it.select_one(".username")
         author = author_el.get_text(strip=True) if author_el else "Unknown"
 
-        # pinned? (определяем по prefix)
-        classes = it.get("class", [])
-        pinned = any(c.startswith("is-prefix") for c in classes)
+        # закреплённая ли?
+        pinned = bool(it.select_one(".structItem-status--sticky"))
 
-        out.append({
+        return {
             "tid": tid,
             "title": title,
             "author": author,
             "url": url,
             "pinned": pinned
-        })
+        }
+
+    for block in containers:
+        item = parse_item(block)
+        if item:
+            out.append(item)
 
     return out
+
 
 
 
