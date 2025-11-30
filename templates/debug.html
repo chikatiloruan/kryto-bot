@@ -1,43 +1,36 @@
-<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <title>Debug — Forum Tracker</title>
-  <link rel="stylesheet" href="/static/style.css">
-  <script>
-    async function loadLogs(){
-      const r = await fetch('/api/logs');
-      const j = await r.json();
-      const el = document.getElementById('logs');
-      el.innerText = j.logs.join("\n");
-    }
-    async function revealCookies(){
-      const r = await fetch('/api/cookies/reveal', {method: 'POST'});
-      const j = await r.json();
-      document.getElementById('cookies').innerText = JSON.stringify(j, null, 2);
-    }
-    setInterval(loadLogs, 2000);
-    window.onload = loadLogs;
-  </script>
-</head>
-<body class="bg">
-  <nav class="topbar"><div class="brand">Debug Panel</div><div class="navactions"><a href="/">Back</a></div></nav>
-  <main class="container">
-    <section class="card">
-      <h3>Info</h3>
-      <pre>{{ info }}</pre>
-    </section>
+<!-- templates/debug.html -->
+{% extends "base.html" %}
+{% block content %}
+<h4>Full debug</h4>
 
-    <section class="card">
-      <h3>Cookies (hidden, press reveal)</h3>
-      <button onclick="revealCookies()">Reveal cookies</button>
-      <pre id="cookies">[hidden]</pre>
-    </section>
+<div class="mb-3">
+  <h6>Tracker debug (raw)</h6>
+  <pre style="max-height:360px;overflow:auto" class="bg-black text-light p-2 small">{{ tracker_debug }}</pre>
+</div>
 
-    <section class="card">
-      <h3>Recent logs</h3>
-      <pre id="logs">loading…</pre>
-    </section>
-  </main>
-</body>
-</html>
+<div class="mb-3">
+  <h6>Last actions</h6>
+  <table class="table table-sm table-dark">
+    <thead><tr><th>Time</th><th>Actor</th><th>Action</th><th>Details</th></tr></thead>
+    <tbody>
+      {% for a in actions %}
+      <tr>
+        <td>{{ a['ts_iso'] }}</td><td>{{ a['actor'] }}</td><td>{{ a['action'] }}</td><td style="max-width:40ch;word-break:break-all">{{ a['details'] }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="mb-3">
+  <h6>Last visits</h6>
+  <table class="table table-sm table-dark">
+    <thead><tr><th>Time</th><th>IP</th><th>Path</th><th>UA</th></tr></thead>
+    <tbody>
+      {% for v in visits %}
+      <tr><td>{{ v['ts_iso'] }}</td><td>{{ v['ip'] }}</td><td>{{ v['path'] }}</td><td style="max-width:40ch;word-break:break-all">{{ v['ua'] }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}
