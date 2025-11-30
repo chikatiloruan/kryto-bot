@@ -366,7 +366,7 @@ class ForumTracker:
         if not url.startswith(FORUM_BASE):
             debug(f"[process] skipping non-forum url: {url}")
             return
-        html = fetch_html(url)
+        html = self.fetch_html(url)
         if not html:
             warn(f"failed to fetch: {url}")
             return
