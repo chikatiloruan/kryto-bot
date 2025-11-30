@@ -118,7 +118,7 @@ def parse_thread_posts(html: str, page_url: str):
             date = t.get("datetime") if t else (t.get_text(strip=True) if t else "")
 
             # Текст поста — именно ТУТ правильный путь
-            body = msg.select_one("div.bbWrapper")
+            body = msg.select_one("div.message-userContent.lbContainer.js-lbContainer")
             if body:
                 text = body.get_text("\n", strip=True)
             else:
