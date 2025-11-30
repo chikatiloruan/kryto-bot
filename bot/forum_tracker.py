@@ -501,7 +501,7 @@ class ForumTracker:
         except Exception:
             debug("[POST] Cookies: (not available)")
 
-        html = fetch_html(url)
+        html = self.fetch_html(url)
         if not html:
             return {"ok": False, "error": "Cannot fetch page"}
 
