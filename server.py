@@ -1,287 +1,229 @@
 # server.py
-"""
-Flask admin panel + status API for your ForumTracker bot.
-Place next to your project root and run: python server.py
-"""
-import os
 import threading
 import time
-from datetime import datetime
-from flask import Flask, request, redirect, url_for, render_template_string, jsonify, flash
-import traceback
+import html
+from flask import (
+    Flask, render_template, request, redirect, url_for,
+    session, jsonify, send_from_directory
+)
+from flask.helpers import make_response
+from functools import wraps
+import os
+from config import (
+    WEB_LOGIN, WEB_PASSWORD, DEBUG_PASSWORD, FLASK_SECRET,
+    WEB_PORT, ALLOW_REMOTE
+)
+# импортируем твой трекер
+from bot.forum_tracker import ForumTracker, stay_online_loop
 
-# ---- try to import bot modules (your project) ----
-try:
-    from config import XF_USER, XF_TFA_TRUST, XF_SESSION, FORUM_BASE, POLL_INTERVAL_SEC, VK_TOKEN
-except Exception:
-    # fallback empty config so server still runs (but tracker will warn)
-    XF_USER = XF_SESSION = XF_TFA_TRUST = FORUM_BASE = ""
-    POLL_INTERVAL_SEC = 20
-    VK_TOKEN = ""
+# -----------------------
+# Flask app
+# -----------------------
+app = Flask(__name__, template_folder="templates", static_folder="static")
+app.secret_key = FLASK_SECRET or "changeme"
 
-# import ForumTracker and storage helpers
-try:
-    from bot.forum_tracker import ForumTracker
-except Exception as e:
-    ForumTracker = None
-    print("WARN: cannot import ForumTracker:", e)
+# Глобальный трекер (запустится ниже)
+TRACKER = None
 
-# storage helpers (used by commands panel)
-try:
-    from bot.storage import add_track, remove_track, list_tracks, list_all_tracks, update_last
-except Exception:
-    # define placeholders to avoid breaking server when storage not available
-    def add_track(peer, url, typ): raise RuntimeError("storage.add_track unavailable")
-    def remove_track(peer, url): raise RuntimeError("storage.remove_track unavailable")
-    def list_tracks(peer): return []
-    def list_all_tracks(): return []
+# Декораторы
+def login_required(f):
+    @wraps(f)
+    def inner(*a, **kw):
+        if not session.get("auth"):
+            return redirect(url_for("login", next=request.path))
+        return f(*a, **kw)
+    return inner
 
-# ---- Flask app ----
-app = Flask(__name__)
-app.secret_key = os.environ.get("ADMIN_SECRET", "devsecret")
+def debug_required(f):
+    @wraps(f)
+    def inner(*a, **kw):
+        if not session.get("debug"):
+            return redirect(url_for("debug_login", next=request.path))
+        return f(*a, **kw)
+    return inner
 
-# ---- create/attach tracker ----
-tracker = None
-tracker_lock = threading.Lock()
+# -----------------------
+# ROUTES
+# -----------------------
+@app.route("/static/<path:p>")
+def static_files(p):
+    return send_from_directory("static", p)
 
-def ensure_tracker():
-    global tracker
-    if tracker is None and ForumTracker is not None:
-        try:
-            # create tracker with cookies from config; vk=None is fine for panel usage
-            tracker = ForumTracker(XF_USER, XF_TFA_TRUST, XF_SESSION, None)
-            # make sure tracker.start() not run here to avoid double-loops if main.py also runs.
-            # we will start it in a background thread from this server.
-        except Exception as e:
-            print("Failed to init ForumTracker:", e)
-            traceback.print_exc()
-    return tracker
-
-# start tracker loop in background
-def background_tracker_start():
-    t = ensure_tracker()
-    if t:
-        try:
-            # start only if it has start() and not running already
-            t.start()
-        except Exception as e:
-            print("Failed to start tracker in background:", e)
-
-# launch tracker start in a daemon thread so server can start fast
-threading.Thread(target=background_tracker_start, daemon=True).start()
-
-# ---- simple helpers ----
-def format_time():
-    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-LOG_PATH = os.path.join(os.path.dirname(__file__), "bot.log")
-
-def tail_log(lines=200):
-    if not os.path.exists(LOG_PATH):
-        return "Log file not found"
-    try:
-        with open(LOG_PATH, "r", encoding="utf-8", errors="ignore") as f:
-            all_lines = f.readlines()
-            return "".join(all_lines[-lines:])
-    except Exception as e:
-        return f"Failed reading log: {e}"
-
-# ---- Templates (small, Bootstrap via CDN) ----
-BASE_HTML = """
-<!doctype html>
-<html lang="ru">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>ForumTracker — Панель</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
-  </head>
-  <body class="bg-light">
-    <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
-      <div class="container-fluid">
-        <a class="navbar-brand" href="/">ForumTracker</a>
-        <div class="collapse navbar-collapse">
-          <ul class="navbar-nav me-auto">
-            <li class="nav-item"><a class="nav-link" href="/">Статус</a></li>
-            <li class="nav-item"><a class="nav-link" href="/tracks">Отслеживания</a></li>
-            <li class="nav-item"><a class="nav-link" href="/send">Отправить ответ</a></li>
-            <li class="nav-item"><a class="nav-link" href="/cookies">Cookies</a></li>
-            <li class="nav-item"><a class="nav-link" href="/logs">Логи</a></li>
-          </ul>
-        </div>
-        <span class="navbar-text text-white">FORUM: {{ forum_base }}</span>
-      </div>
-    </nav>
-    <main class="container my-4">
-      {% with messages = get_flashed_messages() %}
-        {% if messages %}
-          <div class="mb-3">
-            {% for m in messages %}
-              <div class="alert alert-info">{{ m }}</div>
-            {% endfor %}
-          </div>
-        {% endif %}
-      {% endwith %}
-      {{ body|safe }}
-    </main>
-  </body>
-</html>
-"""
-
-# ---- Routes ----
-
-@app.route("/")
+@app.route("/", methods=["GET"])
+@login_required
 def index():
-    t = ensure_tracker()
-    ok = bool(t)
-    status_html = f"""
-    <h3>Статус сервера</h3>
-    <ul>
-      <li>Время: {format_time()}</li>
-      <li>ForumTracker loaded: {'Да' if ok else 'Нет'}</li>
-      <li>FORUM_BASE: {FORUM_BASE or '&lt;не настроено&gt;'}</li>
-      <li>POLL_INTERVAL_SEC: {POLL_INTERVAL_SEC}</li>
-    </ul>
-    <hr/>
-    <h5>Короткая статистика треков</h5>
-    """
+    # показываем краткую панель: треки, кнопки, форма добавления track
+    rows = []
     try:
+        # list_tracks не импортируем — но трекер хранит tracks в БД, проще показать все из storage
+        from bot.storage import list_all_tracks
         rows = list_all_tracks()
-        status_html += f"<p>Всего подписок в БД: {len(rows)}</p>"
-    except Exception:
-        status_html += "<p>Не удалось получить список треков (storage unavailable)</p>"
-
-    body = status_html
-    return render_template_string(BASE_HTML, body=body, forum_base=FORUM_BASE)
-
-# tracks list + add/remove UI
-@app.route("/tracks", methods=["GET", "POST"])
-def tracks():
-    if request.method == "POST":
-        action = request.form.get("action")
-        url = request.form.get("url", "").strip()
-        if not url:
-            flash("Пустой URL")
-            return redirect(url_for("tracks"))
-        try:
-            url = url if url.startswith("http") else f"https://{url}"
-            if action == "add":
-                add_track(-1, url, "thread")  # peer -1 is generic (you can adapt)
-                flash(f"Добавлено: {url}")
-            elif action == "remove":
-                remove_track(-1, url)
-                flash(f"Удалено: {url}")
-        except Exception as e:
-            flash(f"Ошибка storage: {e}")
-        return redirect(url_for("tracks"))
-
-    try:
-        rows = list_tracks(-1)
     except Exception:
         rows = []
-    html = "<h3>Отслеживания (по пользователю -1)</h3>"
-    html += """
-    <form method="post" class="row g-2 mb-3">
-      <div class="col-auto"><input name="url" class="form-control" placeholder="https://forum.matrp.ru/..." /></div>
-      <div class="col-auto">
-        <button name="action" value="add" class="btn btn-success">Добавить</button>
-        <button name="action" value="remove" class="btn btn-danger">Удалить</button>
-      </div>
-    </form>
-    """
-    if rows:
-        html += "<ul class='list-group'>"
-        for u,t,l in rows:
-            html += f"<li class='list-group-item'>{u} — {t} — last: {l}</li>"
-        html += "</ul>"
-    else:
-        html += "<p>Нет записей.</p>"
+    return render_template("dashboard.html", rows=rows)
 
-    return render_template_string(BASE_HTML, body=html, forum_base=FORUM_BASE)
-
-# route to send a reply via tracker.post_message
-@app.route("/send", methods=["GET","POST"])
-def send():
+# login for panel
+@app.route("/login", methods=["GET", "POST"])
+def login():
     if request.method == "POST":
-        url = request.form.get("url", "").strip()
-        text = request.form.get("text", "").strip()
-        if not url or not text:
-            flash("URL и текст обязательны")
-            return redirect(url_for("send"))
-        t = ensure_tracker()
-        if not t:
-            flash("Tracker не инициализирован")
-            return redirect(url_for("send"))
+        u = request.form.get("username", "")
+        p = request.form.get("password", "")
+        if u == WEB_LOGIN and p == WEB_PASSWORD:
+            session["auth"] = True
+            session.permanent = True
+            next_url = request.args.get("next") or url_for("index")
+            return redirect(next_url)
+        return render_template("login.html", error="Неверный логин/пароль")
+    return render_template("login.html")
+
+# logout
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect(url_for("login"))
+
+# debug-login (separate password)
+@app.route("/debug-login", methods=["GET", "POST"])
+@login_required
+def debug_login():
+    if request.method == "POST":
+        p = request.form.get("debug_password", "")
+        if p == DEBUG_PASSWORD:
+            session["debug"] = True
+            return redirect(url_for("debug"))
+        return render_template("debug_login.html", error="Неверный debug-пароль")
+    return render_template("debug_login.html")
+
+# debug dashboard (requires debug)
+@app.route("/debug")
+@login_required
+@debug_required
+def debug():
+    # Возвращаем логи/состояние трекера/cookies (скрытые по умолчанию в обычной панеле)
+    cookies = {}
+    try:
+        cookies = TRACKER.session.cookies.get_dict()
+    except Exception:
+        cookies = {}
+    # краткая инфа о трекере
+    info = {
+        "interval": getattr(TRACKER, "interval", None),
+        "running": getattr(TRACKER, "_running", None),
+    }
+    return render_template("debug.html", cookies=cookies, info=info)
+
+# AJAX лог (fetch logs) — мы сохраняем последние 200 линий в TRACKER.logs (если есть)
+@app.route("/api/logs")
+@login_required
+@debug_required
+def api_logs():
+    logs = []
+    try:
+        logs = getattr(TRACKER, "recent_logs", [])[-500:]
+    except Exception:
+        logs = []
+    return jsonify({"logs": logs})
+
+# API: добавить отслеживание (ручной peer_id)
+@app.route("/api/add_track", methods=["POST"])
+@login_required
+def api_add_track():
+    url = request.form.get("url", "")
+    peer_id = request.form.get("peer_id", "")
+    if not url or not peer_id:
+        return make_response("Missing fields", 400)
+    try:
+        # используем storage.add_track
+        from bot.storage import add_track
+        from bot.utils import normalize_url, detect_type
+        url = normalize_url(url)
+        add_track(int(peer_id), url, detect_type(url))
+        return redirect(url_for("index"))
+    except Exception as e:
+        return make_response(f"Error: {e}", 500)
+
+# API: удалить трек
+@app.route("/api/remove_track", methods=["POST"])
+@login_required
+def api_remove_track():
+    url = request.form.get("url", "")
+    peer_id = request.form.get("peer_id", "")
+    if not url or not peer_id:
+        return make_response("Missing fields", 400)
+    try:
+        from bot.storage import remove_track
+        remove_track(int(peer_id), url)
+        return redirect(url_for("index"))
+    except Exception as e:
+        return make_response(f"Error: {e}", 500)
+
+# API: скрыть/показать cookies (debug only)
+@app.route("/api/cookies/reveal", methods=["POST"])
+@login_required
+@debug_required
+def api_cookies_reveal():
+    cookies = {}
+    try:
+        cookies = TRACKER.session.cookies.get_dict()
+    except Exception:
+        cookies = {}
+    return jsonify(cookies)
+
+# Shutdown (debug only)
+@app.route("/api/shutdown", methods=["POST"])
+@login_required
+@debug_required
+def api_shutdown():
+    func = request.environ.get('werkzeug.server.shutdown')
+    if func:
+        func()
+    return "Shutting down..."
+
+# -----------------------
+# Start tracker in background when server starts
+# -----------------------
+def start_tracker_background():
+    global TRACKER
+    # create ForumTracker(vk) — we don't have VK here, pass None
+    try:
+        TRACKER = ForumTracker(None)
+    except Exception as e:
+        # if tracker expects cookies args signature, try fallback with globals
         try:
-            res = t.post_message(url, text)
-            if res.get("ok"):
-                flash("Сообщение отправлено (" + res.get("response","ok") + ")")
-            else:
-                flash("Ошибка: " + str(res.get("error", "unknown")))
-        except Exception as e:
-            flash("Ошибка отправки: " + str(e))
-        return redirect(url_for("send"))
+            from config import XF_USER, XF_TFA_TRUST, XF_SESSION
+            TRACKER = ForumTracker(XF_USER, XF_TFA_TRUST, XF_SESSION, None)
+        except Exception:
+            TRACKER = ForumTracker(None)
+    # attach simple recent_logs list to track logs
+    if not hasattr(TRACKER, "recent_logs"):
+        TRACKER.recent_logs = []
 
-    html = """
-    <h3>Отправить ответ в тему</h3>
-    <form method="post" class="mb-3">
-      <div class="mb-2"><input name="url" class="form-control" placeholder="https://forum.matrp.ru/index.php?threads/..." /></div>
-      <div class="mb-2"><textarea name="text" class="form-control" rows="6" placeholder="Текст ответа"></textarea></div>
-      <button class="btn btn-primary">Отправить</button>
-    </form>
-    """
-    return render_template_string(BASE_HTML, body=html, forum_base=FORUM_BASE)
+    # monkey-patch Tracker debug log appender if possible
+    def append_log(line):
+        try:
+            TRACKER.recent_logs.append(line)
+            if len(TRACKER.recent_logs) > 1000:
+                TRACKER.recent_logs.pop(0)
+        except Exception:
+            pass
 
-# cookies status
-@app.route("/cookies")
-def cookies():
-    t = ensure_tracker()
-    if not t:
-        return render_template_string(BASE_HTML, body="<p>Tracker не инициализирован</p>", forum_base=FORUM_BASE)
+    # start tracker thread if not running
     try:
-        r = t.check_cookies()
-    except Exception as e:
-        r = {"ok": False, "error": str(e)}
-    html = "<h3>Проверка cookies</h3><pre>" + jsonify(r).get_data(as_text=True) + "</pre>"
-    return render_template_string(BASE_HTML, body=html, forum_base=FORUM_BASE)
+        TRACKER.start()
+    except Exception:
+        pass
 
-# logs
-@app.route("/logs")
-def logs():
-    txt = tail_log(400)
-    html = "<h3>Логи</h3><pre style='white-space:pre-wrap; background:#111; color:#ddd; padding:10px;'>" + txt + "</pre>"
-    return render_template_string(BASE_HTML, body=html, forum_base=FORUM_BASE)
-
-# simple JSON API endpoints (for automation)
-@app.route("/api/status")
-def api_status():
-    t = ensure_tracker()
-    ok = bool(t)
-    return jsonify({
-        "time": format_time(),
-        "tracker_loaded": ok,
-        "forum_base": FORUM_BASE,
-    })
-
-@app.route("/api/send", methods=["POST"])
-def api_send():
-    data = request.json or {}
-    url = data.get("url")
-    text = data.get("text")
-    if not url or not text:
-        return jsonify({"ok": False, "error": "url & text required"}), 400
-    t = ensure_tracker()
-    if not t:
-        return jsonify({"ok": False, "error": "tracker not loaded"}), 500
+    # start online pinger in separate thread (stay_online_loop exists)
     try:
-        res = t.post_message(url, text)
-        return jsonify(res)
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+        threading.Thread(target=stay_online_loop, daemon=True).start()
+    except Exception:
+        pass
 
-# run server
+# -----------------------
+# Main
+# -----------------------
 if __name__ == "__main__":
-    host = os.environ.get("WEB_HOST", "0.0.0.0")
-    port = int(os.environ.get("WEB_PORT", "8080"))
-    print(f"Starting web panel on http://{host}:{port}  (tracker background start)")
-    app.run(host=host, port=port, debug=False)
+    # start tracker before flask
+    start_tracker_background()
+    host = "0.0.0.0" if ALLOW_REMOTE else "127.0.0.1"
+    app.run(host=host, port=WEB_PORT, debug=False)
