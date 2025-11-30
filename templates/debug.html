@@ -1,36 +1,26 @@
-<!-- templates/debug.html -->
 {% extends "base.html" %}
 {% block content %}
-<h4>Full debug</h4>
-
-<div class="mb-3">
-  <h6>Tracker debug (raw)</h6>
-  <pre style="max-height:360px;overflow:auto" class="bg-black text-light p-2 small">{{ tracker_debug }}</pre>
+<h1>Debug панель</h1>
+<div class="card">
+  <h3>Tracker debug</h3>
+  <pre style="max-height:300px; overflow:auto">{{ tracker_debug }}</pre>
 </div>
 
-<div class="mb-3">
-  <h6>Last actions</h6>
-  <table class="table table-sm table-dark">
-    <thead><tr><th>Time</th><th>Actor</th><th>Action</th><th>Details</th></tr></thead>
-    <tbody>
-      {% for a in actions %}
-      <tr>
-        <td>{{ a['ts_iso'] }}</td><td>{{ a['actor'] }}</td><td>{{ a['action'] }}</td><td style="max-width:40ch;word-break:break-all">{{ a['details'] }}</td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
+<div class="card">
+  <h3>Последние 200 действий</h3>
+  <ul class="list-compact">
+    {% for a in actions %}
+      <li>{{ a['ts_iso'] }} — {{ a['actor'] }} — {{ a['action'] }} — {{ a['details'] }}</li>
+    {% endfor %}
+  </ul>
 </div>
 
-<div class="mb-3">
-  <h6>Last visits</h6>
-  <table class="table table-sm table-dark">
-    <thead><tr><th>Time</th><th>IP</th><th>Path</th><th>UA</th></tr></thead>
-    <tbody>
-      {% for v in visits %}
-      <tr><td>{{ v['ts_iso'] }}</td><td>{{ v['ip'] }}</td><td>{{ v['path'] }}</td><td style="max-width:40ch;word-break:break-all">{{ v['ua'] }}</td></tr>
-      {% endfor %}
-    </tbody>
-  </table>
+<div class="card">
+  <h3>Последние 200 посещений</h3>
+  <ul class="list-compact">
+    {% for v in visits %}
+      <li>{{ v['ts_iso'] }} — {{ v['ip'] }} — {{ v['user'] }} — {{ v['path'] }} — {{ v['ua'][:80] }}</li>
+    {% endfor %}
+  </ul>
 </div>
 {% endblock %}
