@@ -1,23 +1,31 @@
-<!doctype html>
-<html>
+<!DOCTYPE html>
+<html lang="ru">
 <head>
-  <meta charset="utf-8">
-  <title>Login — Forum Tracker</title>
-  <link rel="stylesheet" href="/static/style.css">
+    <meta charset="UTF-8">
+    <title>Forum Tracker — Вход</title>
+    <link rel="stylesheet" href="/static/style.css">
 </head>
-<body class="bg">
-  <div class="panel">
-    <h2>Forum Tracker — Вход</h2>
-    {% if error %}
-      <div class="err">{{ error }}</div>
-    {% endif %}
-    <form method="post">
-      <label>Username</label>
-      <input name="username" placeholder="admin" />
-      <label>Password</label>
-      <input name="password" type="password" />
-      <button type="submit">Войти</button>
-    </form>
-  </div>
+<body class="dark">
+
+<div class="login-container">
+    <div class="login-box">
+        <h1 class="title">ForumTracker — Вход</h1>
+
+        {% if error %}
+        <div class="error">{{ error }}</div>
+        {% endif %}
+
+        <form method="POST">
+            <label for="user">Логин</label>
+            <input id="user" name="username" type="text" placeholder="admin" required>
+
+            <label for="pass">Пароль</label>
+            <input id="pass" name="password" type="password" placeholder="●●●●●●" required>
+
+            <button type="submit" class="btn">Войти</button>
+        </form>
+    </div>
+</div>
+
 </body>
 </html>
