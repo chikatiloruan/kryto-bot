@@ -1,0 +1,23 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Login — Forum Tracker</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="bg">
+  <div class="panel">
+    <h2>Forum Tracker — Вход</h2>
+    {% if error %}
+      <div class="err">{{ error }}</div>
+    {% endif %}
+    <form method="post">
+      <label>Username</label>
+      <input name="username" placeholder="admin" />
+      <label>Password</label>
+      <input name="password" type="password" />
+      <button type="submit">Войти</button>
+    </form>
+  </div>
+</body>
+</html>
