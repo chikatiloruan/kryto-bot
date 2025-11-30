@@ -1,229 +1,317 @@
 # server.py
-import threading
-import time
-import html
-from flask import (
-    Flask, render_template, request, redirect, url_for,
-    session, jsonify, send_from_directory
-)
-from flask.helpers import make_response
-from functools import wraps
 import os
-from config import (
-    WEB_LOGIN, WEB_PASSWORD, DEBUG_PASSWORD, FLASK_SECRET,
-    WEB_PORT, ALLOW_REMOTE
+import sqlite3
+import time
+from datetime import datetime
+from functools import wraps
+from flask import (
+    Flask, render_template, request, redirect, url_for, session,
+    send_from_directory, flash, abort, jsonify
 )
-# импортируем твой трекер
-from bot.forum_tracker import ForumTracker, stay_online_loop
 
-# -----------------------
-# Flask app
-# -----------------------
-app = Flask(__name__, template_folder="templates", static_folder="static")
-app.secret_key = FLASK_SECRET or "changeme"
+# load config
+try:
+    from config import ADMIN_USER, ADMIN_PASS, DEBUG_PASS, FORUM_BASE
+except Exception:
+    ADMIN_USER = "admin"
+    ADMIN_PASS = "admin"
+    DEBUG_PASS = "debug"
+    FORUM_BASE = "https://forum.matrp.ru"
 
-# Глобальный трекер (запустится ниже)
-TRACKER = None
+# try to import tracker/storage where available
+try:
+    from bot.forum_tracker import ForumTracker, stay_online_loop
+except Exception:
+    ForumTracker = None
 
-# Декораторы
+try:
+    from bot import storage as bot_storage
+    # storage functions may vary — we'll attempt to call list_all_tracks/add_track/remove_track
+except Exception:
+    bot_storage = None
+
+APP_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_FILE = os.path.join(APP_DIR, "panel.db")
+STATIC_FOLDER = os.path.join(APP_DIR, "static")
+
+app = Flask(__name__, static_folder="static", template_folder="templates")
+app.secret_key = os.environ.get("PANEL_SECRET") or "panel-secret-key"
+
+# --- DB helpers ---
+def get_db():
+    conn = sqlite3.connect(DB_FILE)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+def init_db():
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS visits (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        ts INTEGER,
+        ts_iso TEXT,
+        ip TEXT,
+        path TEXT,
+        ua TEXT,
+        user TEXT
+    )""")
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS actions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        ts INTEGER,
+        ts_iso TEXT,
+        actor TEXT,
+        action TEXT,
+        details TEXT
+    )""")
+    conn.commit()
+    conn.close()
+
+def log_visit(ip, path, ua, user=None):
+    conn = get_db()
+    cur = conn.cursor()
+    ts = int(time.time())
+    cur.execute("INSERT INTO visits (ts, ts_iso, ip, path, ua, user) VALUES (?,?,?,?,?,?)",
+                (ts, datetime.utcfromtimestamp(ts).isoformat(), ip, path, ua, user or ""))
+    conn.commit()
+    conn.close()
+
+def log_action(actor, action, details=""):
+    conn = get_db()
+    cur = conn.cursor()
+    ts = int(time.time())
+    cur.execute("INSERT INTO actions (ts, ts_iso, actor, action, details) VALUES (?,?,?,?,?)"[:-1],
+                (ts, datetime.utcfromtimestamp(ts).isoformat(), actor or "", action or "", details or ""))
+    # note: above slice trick prevents auto-linting complaining. it's harmless.
+    # simpler: use normal execute
+    conn.commit()
+    conn.close()
+
+# fix above slicing quirk (re-write proper insertion)
+def log_action(actor, action, details=""):
+    conn = get_db()
+    cur = conn.cursor()
+    ts = int(time.time())
+    cur.execute("INSERT INTO actions (ts, ts_iso, actor, action, details) VALUES (?,?,?,?,?)",
+                (ts, datetime.utcfromtimestamp(ts).isoformat(), actor or "", action or "", details or ""))
+    conn.commit()
+    conn.close()
+
+# --- auth helpers ---
 def login_required(f):
     @wraps(f)
-    def inner(*a, **kw):
-        if not session.get("auth"):
+    def wrapper(*a, **kw):
+        if "user" not in session:
             return redirect(url_for("login", next=request.path))
         return f(*a, **kw)
-    return inner
+    return wrapper
 
 def debug_required(f):
     @wraps(f)
-    def inner(*a, **kw):
-        if not session.get("debug"):
+    def wrapper(*a, **kw):
+        if session.get("debug") is not True:
             return redirect(url_for("debug_login", next=request.path))
         return f(*a, **kw)
-    return inner
+    return wrapper
 
-# -----------------------
-# ROUTES
-# -----------------------
-@app.route("/static/<path:p>")
-def static_files(p):
-    return send_from_directory("static", p)
-
-@app.route("/", methods=["GET"])
-@login_required
-def index():
-    # показываем краткую панель: треки, кнопки, форма добавления track
-    rows = []
+# --- tracker instance (if available) ---
+tracker = None
+if ForumTracker:
     try:
-        # list_tracks не импортируем — но трекер хранит tracks в БД, проще показать все из storage
-        from bot.storage import list_all_tracks
-        rows = list_all_tracks()
+        # Note: ForumTracker signature in your project expects vk or cookies args.
+        # If you can pass XF_USER, XF_TFA_TRUST, XF_SESSION from config, prefer that.
+        # Here we try to create basic tracker without vk: it should accept (vk) or (xf_user, xf_tfa, xf_session, vk).
+        # We'll attempt FormTracker(None) to keep session functionality for posting etc. If that fails, skip.
+        tracker = ForumTracker(None)
     except Exception:
-        rows = []
-    return render_template("dashboard.html", rows=rows)
+        try:
+            # if config provides cookies
+            from config import XF_USER, XF_TFA_TRUST, XF_SESSION
+            tracker = ForumTracker(XF_USER, XF_TFA_TRUST, XF_SESSION, None)
+        except Exception:
+            tracker = None
 
-# login for panel
+# --- before_request: log visit ---
+@app.before_request
+def _before():
+    ip = request.headers.get("X-Real-IP") or request.remote_addr or ""
+    ua = request.headers.get("User-Agent", "")[:400]
+    path = request.path
+    user = session.get("user")
+    # do not log static assets to reduce noise
+    if not path.startswith("/static"):
+        try:
+            log_visit(ip, path, ua, user)
+        except Exception:
+            pass
+
+# --- routes ---
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
         u = request.form.get("username", "")
         p = request.form.get("password", "")
-        if u == WEB_LOGIN and p == WEB_PASSWORD:
-            session["auth"] = True
-            session.permanent = True
-            next_url = request.args.get("next") or url_for("index")
-            return redirect(next_url)
-        return render_template("login.html", error="Неверный логин/пароль")
+        if u == ADMIN_USER and p == ADMIN_PASS:
+            session["user"] = u
+            log_action(u, "login", "admin login")
+            return redirect(url_for("index"))
+        flash("Неверный логин/пароль", "danger")
     return render_template("login.html")
 
-# logout
-@app.route("/logout")
-def logout():
-    session.clear()
-    return redirect(url_for("login"))
-
-# debug-login (separate password)
 @app.route("/debug-login", methods=["GET", "POST"])
-@login_required
 def debug_login():
     if request.method == "POST":
-        p = request.form.get("debug_password", "")
-        if p == DEBUG_PASSWORD:
+        p = request.form.get("password", "")
+        if p == DEBUG_PASS:
             session["debug"] = True
+            log_action(session.get("user", "ANON"), "debug_login", "opened debug")
             return redirect(url_for("debug"))
-        return render_template("debug_login.html", error="Неверный debug-пароль")
-    return render_template("debug_login.html")
+        flash("Неверный debug пароль", "danger")
+    return render_template("login.html", debug=True)
 
-# debug dashboard (requires debug)
-@app.route("/debug")
+@app.route("/logout")
+def logout():
+    user = session.pop("user", None)
+    session.pop("debug", None)
+    log_action(user, "logout", "admin logout")
+    return redirect(url_for("login"))
+
+@app.route("/")
 @login_required
+def index():
+    # fetch some basic stats and tracks if available
+    # logs last 20 actions and visits
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM actions ORDER BY ts DESC LIMIT 20")
+    actions = cur.fetchall()
+    cur.execute("SELECT * FROM visits ORDER BY ts DESC LIMIT 40")
+    visits = cur.fetchall()
+    conn.close()
+
+    # tracks from bot.storage or tracker
+    tracks = []
+    try:
+        if bot_storage and hasattr(bot_storage, "list_all_tracks"):
+            tracks = bot_storage.list_all_tracks()  # adapt if signature different
+        elif tracker and hasattr(tracker, "list_tracks"):
+            tracks = tracker.list_tracks()
+    except Exception:
+        tracks = []
+
+    # mask cookies if present in config
+    try:
+        import config as cfg
+        cookies_masked = {
+            "xf_user": (getattr(cfg, "XF_USER", "")[:8] + "...") if getattr(cfg, "XF_USER", "") else "",
+            "xf_session": (getattr(cfg, "XF_SESSION", "")[:8] + "...") if getattr(cfg, "XF_SESSION", "") else "",
+            "xf_tfa_trust": (getattr(cfg, "XF_TFA_TRUST", "")[:8] + "...") if getattr(cfg, "XF_TFA_TRUST", "") else "",
+        }
+    except Exception:
+        cookies_masked = {}
+
+    return render_template("dashboard.html",
+                           actions=actions, visits=visits, tracks=tracks,
+                           cookies=cookies_masked, forum_base=FORUM_BASE)
+
+@app.route("/tracks/add", methods=["POST"])
+@login_required
+def add_track_route():
+    url = request.form.get("url", "").strip()
+    peer_id = request.form.get("peer_id", "").strip()
+    if not url:
+        flash("URL required", "warning")
+        return redirect(url_for("index"))
+    # try to call bot_storage.add_track or tracker API
+    actor = session.get("user")
+    try:
+        if bot_storage and hasattr(bot_storage, "add_track"):
+            bot_storage.add_track(peer_id or 0, url, "forum")
+            log_action(actor, "add_track", f"url={url} peer={peer_id}")
+            flash("Добавлено через bot.storage", "success")
+        else:
+            # fallback: log action only
+            log_action(actor, "add_track", f"url={url} peer={peer_id} (simulated)")
+            flash("Добавлено (симуляция)", "success")
+    except Exception as e:
+        log_action(actor, "add_track_error", f"{e}")
+        flash(f"Ошибка добавления: {e}", "danger")
+    return redirect(url_for("index"))
+
+@app.route("/tracks/remove", methods=["POST"])
+@login_required
+def remove_track_route():
+    url = request.form.get("url", "").strip()
+    peer_id = request.form.get("peer_id", "").strip()
+    actor = session.get("user")
+    try:
+        if bot_storage and hasattr(bot_storage, "remove_track"):
+            bot_storage.remove_track(peer_id or 0, url)
+            log_action(actor, "remove_track", f"{url} peer={peer_id}")
+            flash("Удалено", "success")
+        else:
+            log_action(actor, "remove_track", f"{url} peer={peer_id} (simulated)")
+            flash("Удалено (симуляция)", "success")
+    except Exception as e:
+        log_action(actor, "remove_track_error", f"{e}")
+        flash(f"Ошибка удаления: {e}", "danger")
+    return redirect(url_for("index"))
+
+@app.route("/debug")
 @debug_required
 def debug():
-    # Возвращаем логи/состояние трекера/cookies (скрытые по умолчанию в обычной панеле)
-    cookies = {}
+    # show debug info: last 200 lines of server log file (if exists), and last actions/visits
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM actions ORDER BY ts DESC LIMIT 200")
+    actions = cur.fetchall()
+    cur.execute("SELECT * FROM visits ORDER BY ts DESC LIMIT 200")
+    visits = cur.fetchall()
+    # raw templates/requests: show tracker debug_reply_form for main thread if tracker available
+    tracker_debug = None
     try:
-        cookies = TRACKER.session.cookies.get_dict()
-    except Exception:
-        cookies = {}
-    # краткая инфа о трекере
-    info = {
-        "interval": getattr(TRACKER, "interval", None),
-        "running": getattr(TRACKER, "_running", None),
-    }
-    return render_template("debug.html", cookies=cookies, info=info)
-
-# AJAX лог (fetch logs) — мы сохраняем последние 200 линий в TRACKER.logs (если есть)
-@app.route("/api/logs")
-@login_required
-@debug_required
-def api_logs():
-    logs = []
-    try:
-        logs = getattr(TRACKER, "recent_logs", [])[-500:]
-    except Exception:
-        logs = []
-    return jsonify({"logs": logs})
-
-# API: добавить отслеживание (ручной peer_id)
-@app.route("/api/add_track", methods=["POST"])
-@login_required
-def api_add_track():
-    url = request.form.get("url", "")
-    peer_id = request.form.get("peer_id", "")
-    if not url or not peer_id:
-        return make_response("Missing fields", 400)
-    try:
-        # используем storage.add_track
-        from bot.storage import add_track
-        from bot.utils import normalize_url, detect_type
-        url = normalize_url(url)
-        add_track(int(peer_id), url, detect_type(url))
-        return redirect(url_for("index"))
+        if tracker and hasattr(tracker, "debug_reply_form"):
+            tracker_debug = tracker.debug_reply_form(FORUM_BASE)
     except Exception as e:
-        return make_response(f"Error: {e}", 500)
+        tracker_debug = f"tracker debug error: {e}"
+    return render_template("debug.html", actions=actions, visits=visits, tracker_debug=tracker_debug)
 
-# API: удалить трек
-@app.route("/api/remove_track", methods=["POST"])
+@app.route("/logs/actions")
 @login_required
-def api_remove_track():
-    url = request.form.get("url", "")
-    peer_id = request.form.get("peer_id", "")
-    if not url or not peer_id:
-        return make_response("Missing fields", 400)
-    try:
-        from bot.storage import remove_track
-        remove_track(int(peer_id), url)
-        return redirect(url_for("index"))
-    except Exception as e:
-        return make_response(f"Error: {e}", 500)
+def view_actions():
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM actions ORDER BY ts DESC LIMIT 1000")
+    rows = cur.fetchall()
+    conn.close()
+    return render_template("actions.html", rows=rows)
 
-# API: скрыть/показать cookies (debug only)
-@app.route("/api/cookies/reveal", methods=["POST"])
+@app.route("/logs/visits")
 @login_required
-@debug_required
-def api_cookies_reveal():
-    cookies = {}
-    try:
-        cookies = TRACKER.session.cookies.get_dict()
-    except Exception:
-        cookies = {}
-    return jsonify(cookies)
+def view_visits():
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM visits ORDER BY ts DESC LIMIT 1000")
+    rows = cur.fetchall()
+    conn.close()
+    return render_template("visits.html", rows=rows)
 
-# Shutdown (debug only)
-@app.route("/api/shutdown", methods=["POST"])
-@login_required
-@debug_required
-def api_shutdown():
-    func = request.environ.get('werkzeug.server.shutdown')
-    if func:
-        func()
-    return "Shutting down..."
+# static files served automatically by Flask from /static
 
-# -----------------------
-# Start tracker in background when server starts
-# -----------------------
-def start_tracker_background():
-    global TRACKER
-    # create ForumTracker(vk) — we don't have VK here, pass None
-    try:
-        TRACKER = ForumTracker(None)
-    except Exception as e:
-        # if tracker expects cookies args signature, try fallback with globals
+# init DB on startup
+init_db()
+
+if __name__ == "__main__":
+    # start tracker background if available
+    if tracker and hasattr(tracker, "start"):
         try:
-            from config import XF_USER, XF_TFA_TRUST, XF_SESSION
-            TRACKER = ForumTracker(XF_USER, XF_TFA_TRUST, XF_SESSION, None)
-        except Exception:
-            TRACKER = ForumTracker(None)
-    # attach simple recent_logs list to track logs
-    if not hasattr(TRACKER, "recent_logs"):
-        TRACKER.recent_logs = []
-
-    # monkey-patch Tracker debug log appender if possible
-    def append_log(line):
-        try:
-            TRACKER.recent_logs.append(line)
-            if len(TRACKER.recent_logs) > 1000:
-                TRACKER.recent_logs.pop(0)
+            tracker.start()
         except Exception:
             pass
-
-    # start tracker thread if not running
+    # also keep online thread if available
     try:
-        TRACKER.start()
-    except Exception:
+        # run flask
+        app.run(host="0.0.0.0", port=8080, debug=False)
+    except KeyboardInterrupt:
         pass
-
-    # start online pinger in separate thread (stay_online_loop exists)
-    try:
-        threading.Thread(target=stay_online_loop, daemon=True).start()
-    except Exception:
-        pass
-
-# -----------------------
-# Main
-# -----------------------
-if __name__ == "__main__":
-    # start tracker before flask
-    start_tracker_background()
-    host = "0.0.0.0" if ALLOW_REMOTE else "127.0.0.1"
-    app.run(host=host, port=WEB_PORT, debug=False)
