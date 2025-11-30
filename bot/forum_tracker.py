@@ -435,7 +435,7 @@ class ForumTracker:
         debug(f"[manual_fetch_posts] Cookies = {build_cookies()}")
         if not url.startswith(FORUM_BASE):
             raise ValueError("URL outside FORUM_BASE")
-        html = fetch_html(url)
+        html = self.fetch_html(url)
         if not html:
             raise RuntimeError("Failed to fetch page (check cookies)")
         posts = parse_thread_posts(html, url)
