@@ -410,24 +410,47 @@ class ForumTracker:
                         warn(f"update_last error: {e}")
 
         # FORUM (new topics)
-        elif typ == "forum":
-            topics = parse_forum_topics(html, url)
-            if not topics:
-                return
-            latest = topics[-6:]
-            for peer_id, _, last in subscribers:
-                last_str = str(last) if last is not None else None
-                for t in latest:
-                    if last_str != str(t["tid"]):
-                        msg = f"🆕 Новая тема\n📄 {t['title']}\n👤 {t['author']}\n🔗 {t['url']}"
-                        try:
-                            self.vk.send(peer_id, msg)
-                        except Exception as e:
-                            warn(f"vk send error: {e}")
-                        try:
-                            update_last(peer_id, url, str(t["tid"]))
-                        except Exception as e:
-                            warn(f"update_last error: {e}")
+        if type_ == "forum":
+    topics = parse_forum_topics(html, url)
+    if not topics:
+        raise Exception("parse_forum_topics returned empty list")
+
+    # 💡 Собираем ВСЕ tid, включая pinned и обычные
+    # parse_forum_topics уже отдаёт их в правильном порядке:
+    # pinned -> сверху, обычные -> дальше
+    all_tids = [t["tid"] for t in topics]
+
+    # tid самой новой темы
+    newest_tid = max(all_tids)
+
+    # last_id из БД
+    last = subs_last_id
+    try:
+        last = int(last) if last else None
+    except:
+        last = None
+
+    # Если last_id ещё нет — только устанавливаем
+    if not last:
+        update_last(peer_id, url, str(newest_tid))
+        return
+
+    # Если появились темы, tid которых больше last_id
+    new_topics = [t for t in topics if t["tid"] > last]
+
+    if new_topics:
+        # От старой к новой — чтобы порядок был нормальный
+        for t in sorted(new_topics, key=lambda x: x["tid"]):
+            msg = (
+                "🆕 Новая тема в разделе!\n\n"
+                f"📄 {t['title']}\n"
+                f"👤 Автор: {t['author']}\n"
+                f"🔗 {t['url']}"
+            )
+            self.vk.send(peer_id, msg)
+
+        # обновляем last_id на самый большой tid
+        update_last(peer_id, url, str(newest_tid))
 
         # MEMBERS
         elif typ == "members":
