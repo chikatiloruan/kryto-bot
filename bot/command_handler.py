@@ -70,6 +70,11 @@ class CommandHandler:
             if cmd == "/check":
                 return self.cmd_check(peer_id)
 
+            
+            if cmd == "/debug_forum":
+                return self.cmd_debug_forum(peer_id, parts)
+
+
             if cmd == "/checkfa":
                 return self.cmd_checkfa(peer_id, parts)
 
@@ -148,6 +153,23 @@ class CommandHandler:
             f"HTML:\n{r.get('html_sample')}"
         )
         self.vk.send(peer_id, msg)
+
+    def cmd_debug_forum(self, peer_id, parts):
+        if len(parts) < 2:
+            return self.vk.send(peer_id, "Использование: /debug_forum <url>")
+        url = normalize_url(parts[1])
+        if not url.startswith(FORUM_BASE):
+            return self.vk.send(peer_id, f"❌ Только {FORUM_BASE}")
+        try:
+            res = self.tracker.debug_forum(url)
+        except Exception as e:
+            return self.vk.send(peer_id, f"❌ Ошибка debug_forum: {e}")
+            
+    # VK ограничение — разобьём по 3800 символов
+    chunks = [res[i:i+3800] for i in range(0, len(res), 3800)]
+    for ch in chunks:
+        self.vk.send(peer_id, ch)
+
 
     # ---------------------------------------------------------
     # TRACK
