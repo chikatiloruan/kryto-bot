@@ -86,7 +86,7 @@ def parse_thread_posts(html: str, page_url: str):
     soup = BeautifulSoup(html or "", "html.parser")
 
     # Все посты по новому формату
-    posts = soup.select("message-content.js-messageContent")
+    posts = soup.select("message-userContent.lbContainer.js-lbContainer")
     out = []
 
     for msg in posts:
