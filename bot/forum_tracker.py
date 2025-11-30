@@ -690,7 +690,7 @@ class ForumTracker:
                 warn(f"keepalive error: {e}")
             time.sleep(max(60, self.interval * 3))
 
-   def debug_forum(self, url: str) -> str:
+    def debug_forum(self, url: str) -> str:
     """
     Debug helper для разделов (forums).
     Возвращает подробный отчёт — какие селекторы проверялись,
