@@ -186,63 +186,63 @@ class CommandHandler:
 
     # -------------------- TRACK / UNTRACK / LIST --------------------
     def cmd_track(self, peer_id, parts):
-    if len(parts) < 2:
-        return self.vk.send(peer_id, "Использование: /track <url>")
+        if len(parts) < 2:
+            return self.vk.send(peer_id, "Использование: /track <url>")
 
-    url = normalize_url(parts[1])
+        url = normalize_url(parts[1])
 
     # Проверяем что ссылка относится к форуму
-    if not url.startswith(FORUM_BASE):
-        return self.vk.send(peer_id, f"❌ Можно отслеживать только ссылки: {FORUM_BASE}")
+        if not url.startswith(FORUM_BASE):
+            return self.vk.send(peer_id, f"❌ Можно отслеживать только ссылки: {FORUM_BASE}")
 
     # ---------------------------------------------------------
     #       ДЕТЕКТ КАТЕГОРИИ (forum vs thread)
     # ---------------------------------------------------------
-    if "/index.php?forums/" in url:
-        typ = "forum"
-    elif "/index.php?threads/" in url:
-        typ = "thread"
-    else:
-        return self.vk.send(peer_id, "❌ Эта ссылка не является ни разделом, ни темой.")
+        if "/index.php?forums/" in url:
+            typ = "forum"
+        elif "/index.php?threads/" in url:
+            typ = "thread"
+        else:
+            return self.vk.send(peer_id, "❌ Эта ссылка не является ни разделом, ни темой.")
 
     # ---------------------------------------------------------
     #       ПОЛУЧАЕМ ПОСЛЕДНИЙ ID
     # ---------------------------------------------------------
-    latest = None
+        latest = None
 
-    try:
+        try:
         # Если это тема — берём ID последнего поста
-        if typ == "thread":
-            latest = self.tracker.fetch_latest_post_id(url)
+            if typ == "thread":
+                latest = self.tracker.fetch_latest_post_id(url)
 
         # Если это раздел — берём TID самой последней темы
-        elif typ == "forum":
-            html = self.tracker.fetch_html(url)
-            topics = parse_forum_topics(html, url)
-            if topics:
-                latest = max(t["tid"] for t in topics)
+            elif typ == "forum":
+                html = self.tracker.fetch_html(url)
+                topics = parse_forum_topics(html, url)
+                if topics:
+                    latest = max(t["tid"] for t in topics)
 
-    except Exception:
-        pass
+        except Exception:
+            pass
 
     # ---------------------------------------------------------
     #        СОХРАНЯЕМ В БАЗУ
     # ---------------------------------------------------------
-    add_track(peer_id, url, typ)
+        add_track(peer_id, url, typ)
 
-    if latest:
-        try:
-            update_last(peer_id, url, str(latest))
-        except:
-            pass
+        if latest:
+            try:
+                update_last(peer_id, url, str(latest))
+            except:
+                pass
 
     # ---------------------------------------------------------
     #      УВЕДОМЛЕНИЕ
     # ---------------------------------------------------------
-    if typ == "forum":
-        self.vk.send(peer_id, f"📁 Отслеживание раздела добавлено:\n{url}")
-    else:
-        self.vk.send(peer_id, f"📄 Отслеживание темы добавлено:\n{url}")
+        if typ == "forum":
+            self.vk.send(peer_id, f"📁 Отслеживание раздела добавлено:\n{url}")
+        else:
+            self.vk.send(peer_id, f"📄 Отслеживание темы добавлено:\n{url}")
 
 
     def cmd_untrack(self, peer_id, parts):
