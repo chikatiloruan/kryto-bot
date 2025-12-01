@@ -411,7 +411,7 @@ class ForumTracker:
     # -----------------------------------------------------------------
     # core processor
     # -----------------------------------------------------------------
-    def _process_url(self, url: str, subscribers):
+     def _process_url(self, url: str, subscribers):
         url = normalize_url(url)
 
         if not url.startswith(FORUM_BASE):
