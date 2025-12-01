@@ -413,32 +413,38 @@ class ForumTracker:
     # -----------------------------------------------------------------
     def _process_url(self, url: str, subscribers):
         url = normalize_url(url)
+
         if not url.startswith(FORUM_BASE):
-            debug(f"[process] skipping non-forum url: {url}")
-            return
+           return
 
         html = self.fetch_html(url)
         if not html:
-            warn(f"failed to fetch: {url}")
             return
 
         typ = detect_type(url)
 
-        # ============================================================
-        # THREAD — новые сообщения
-        # ============================================================
+    # ============================================================
+    # THREAD — новые сообщения
+    # ============================================================
         if typ == "thread":
             posts = parse_thread_posts(html, url)
             if not posts:
                 return
 
             newest = posts[-1]
+            newest_id = int(newest["id"])
 
             for peer_id, _, last in subscribers:
-                last_str = str(last) if last is not None else None
 
-                if last_str != str(newest["id"]):
-                    msg = (
+            # last_id всегда int
+                try:
+                    last_id = int(last)
+               except:
+                    last_id = 0
+
+                if newest_id > last_id:
+                # отправляем уведомление
+                   msg = (
                         f"📝 Новый пост\n"
                         f"👤 {newest['author']}  •  {newest['date']}\n\n"
                         f"{(newest['text'][:1500] + '...') if len(newest['text'])>1500 else newest['text']}\n\n"
@@ -446,87 +452,62 @@ class ForumTracker:
                     )
                     try:
                         self.vk.send(peer_id, msg)
-                    except Exception as e:
-                        warn(f"vk send error: {e}")
+                    except:
+                        pass
 
+                # обновляем last_id
                     try:
-                        update_last(peer_id, url, str(newest["id"]))
-                    except Exception as e:
-                        warn(f"update_last error: {e}")
+                        update_last(peer_id, url, str(newest_id))
+                    except:
+                        pass
 
-            return  # END THREAD
+            return
 
-        # ============================================================
-        # FORUM — новые темы (включая pinned)
-        # ============================================================
+    # ============================================================
+    # FORUM — новые темы (включая pinned)
+    # ============================================================
         if typ == "forum":
             topics = parse_forum_topics(html, url)
             if not topics:
-                warn(f"parse_forum_topics returned empty list for {url}")
                 return
 
-            # Собираем все tid — учитываем pinned и обычные
-            all_tids = [t["tid"] for t in topics]
-            if not all_tids:
-                return
-            newest_tid = max(all_tids)
+        # список всех tid
+            tid_list = [int(t["tid"]) for t in topics]
+            newest_tid = max(tid_list)
 
             for peer_id, _, last in subscribers:
+ 
                 try:
-                    last_id = int(last) if last else None
-                except Exception:
-                    last_id = None
+                    last_id = int(last)
+                except:
+                    last_id = 0
 
-                # Если первый запуск — просто записываем
-                if not last_id:
-                    try:
-                        update_last(peer_id, url, str(newest_tid))
-                    except Exception as e:
-                        warn(f"update_last error: {e}")
-                    continue
-
-                # Новые темы: tid > last_id
-                new_topics = [t for t in topics if t["tid"] > last_id]
+            # фильтруем новые темы
+                new_topics = [t for t in topics if int(t["tid"]) > last_id]
 
                 if new_topics:
-                    for t in sorted(new_topics, key=lambda x: x["tid"]):
+                # порядок от старой к новой
+                    for t in sorted(new_topics, key=lambda x: int(x["tid"])):
                         msg = (
-                            "🆕 Новая тема в разделе!\n\n"
+                            "🆕 Новая тема!\n\n"
                             f"📄 {t['title']}\n"
                             f"👤 Автор: {t['author']}\n"
                             f"🔗 {t['url']}"
                         )
                         try:
                             self.vk.send(peer_id, msg)
-                        except Exception as e:
-                            warn(f"vk send error: {e}")
+                        except:
+                            pass
 
-                    try:
-                        update_last(peer_id, url, str(newest_tid))
-                    except Exception as e:
-                        warn(f"update_last error: {e}")
+                # обновляем last_id
+                    update_last(peer_id, url, str(newest_tid))
 
-            return  # END FORUM
-
-        # ============================================================
-        # MEMBERS
-        # ============================================================
-        if typ == "members":
-            soup = BeautifulSoup(html, "html.parser")
-            users = [a.get_text(strip=True) for a in soup.select(".username, .userTitle, .memberUsername a")[:20]]
-            if users:
-                msg = "👥 Участники (часть): " + ", ".join(users)
-                for peer_id, _, _ in subscribers:
-                    try:
-                        self.vk.send(peer_id, msg)
-                    except Exception:
-                        pass
             return
 
-        # ============================================================
-        # UNKNOWN
-        # ============================================================
-        debug(f"[process] unknown type for {url}: {typ}")
+    # ============================================================
+    # UNKNOWN
+    # ============================================================
+        print("[TRACK] Unknown type:", typ)
 
     # -----------------------------------------------------------------
     # manual fetch posts — returns list (used by /checkfa)
