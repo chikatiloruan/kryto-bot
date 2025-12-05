@@ -150,3 +150,49 @@ def log_write(level: str, msg: str):
             conn.close()
     except Exception:
         pass
+
+# storage.py (append)
+def init_templates_table(conn=None):
+    conn_local = conn or _conn()
+    cur = conn_local.cursor()
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS templates (
+        name TEXT PRIMARY KEY,
+        text TEXT NOT NULL
+    )""")
+    conn_local.commit()
+    if conn is None:
+        conn_local.close()
+
+def add_template(name: str, text: str):
+    with _lock:
+        conn = _conn()
+        cur = conn.cursor()
+        cur.execute("INSERT OR REPLACE INTO templates (name, text) VALUES (?, ?)", (name, text))
+        conn.commit()
+        conn.close()
+
+def remove_template(name: str):
+    with _lock:
+        conn = _conn()
+        cur = conn.cursor()
+        cur.execute("DELETE FROM templates WHERE name=?", (name,))
+        conn.commit()
+        conn.close()
+
+def get_template(name: str) -> Optional[str]:
+    conn = _conn()
+    cur = conn.cursor()
+    cur.execute("SELECT text FROM templates WHERE name=?", (name,))
+    r = cur.fetchone()
+    conn.close()
+    return r[0] if r else None
+
+def list_templates() -> List[str]:
+    conn = _conn()
+    cur = conn.cursor()
+    cur.execute("SELECT name FROM templates")
+    rows = [r[0] for r in cur.fetchall()]
+    conn.close()
+    return rows
+
