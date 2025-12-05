@@ -1,24 +1,16 @@
 # -*- coding: utf-8 -*-
 """
-Переработанный command_handler.py
-
-Файл организован в 3 логические части (секции):
-  1) структура и инициализация
-  2) реализации команд (track, untrack, list, ai, otvet, tlist, tlistall и т.д.)
-  3) debug/утилиты и парсинг/вспомогательные методы
-
-Цель: ясная, надёжная и читаемая реализация, исправлены проблемы с
-неопределёнными переменными (res/chunks), корректная работа с tracker.fetch_html
-и сессией, аккуратная разбивка длинных сообщений под ограничения VK.
+Переработанный command_handler.py с поддержкой JSON-шаблонов (data/templates.json),
+командами /profile, /checkpr, /shablon, /addsh, /removesh и улучшенной обработкой ошибок.
 """
-
 from __future__ import annotations
 
 import re
 import traceback
 import sqlite3
 import os
-from typing import List, Tuple, Optional
+import json
+from typing import List, Tuple, Optional, Dict
 
 # локальные импорты
 from .storage import (
@@ -35,22 +27,102 @@ from config import FORUM_BASE
 # путь к БД (для stats)
 DB = os.path.join(os.path.dirname(os.path.dirname(__file__)), "bot_data.db")
 
+# папка для JSON шаблонов
+TEMPLATES_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
+TEMPLATES_FILE = os.path.join(TEMPLATES_DIR, "templates.json")
 
-# ==============================================================
-#  1) СТРУКТУРА КЛАССА И ИНИЦИАЛИЗАЦИЯ
-# ==============================================================
+
+# ----------------- Утилиты шаблонов (JSON) -----------------
+def _ensure_templates_file():
+    if not os.path.exists(TEMPLATES_DIR):
+        try:
+            os.makedirs(TEMPLATES_DIR, exist_ok=True)
+        except Exception:
+            pass
+    if not os.path.exists(TEMPLATES_FILE):
+        try:
+            with open(TEMPLATES_FILE, "w", encoding="utf-8") as f:
+                json.dump({}, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+
+def load_templates() -> Dict[str, Dict[str, str]]:
+    _ensure_templates_file()
+    try:
+        with open(TEMPLATES_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            if isinstance(data, dict):
+                return data
+    except Exception:
+        pass
+    return {}
+
+
+def save_templates(data: Dict[str, Dict[str, str]]) -> bool:
+    _ensure_templates_file()
+    try:
+        with open(TEMPLATES_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        return True
+    except Exception:
+        return False
+
+
+def add_template_for_peer(peer_id: int, name: str, text: str) -> bool:
+    data = load_templates()
+    key = str(peer_id)
+    if key not in data:
+        data[key] = {}
+    data[key][name] = text
+    return save_templates(data)
+
+
+def remove_template_for_peer(peer_id: int, name: str) -> bool:
+    data = load_templates()
+    key = str(peer_id)
+    if key in data and name in data[key]:
+        del data[key][name]
+        # если пусто — удалить ключ
+        if not data[key]:
+            del data[key]
+        return save_templates(data)
+    return False
+
+
+def get_template(peer_id: int, name: str) -> Optional[str]:
+    data = load_templates()
+    key = str(peer_id)
+    if key in data:
+        return data[key].get(name)
+    return None
+
+
+def list_templates(peer_id: int) -> List[str]:
+    data = load_templates()
+    key = str(peer_id)
+    if key in data:
+        return list(data[key].keys())
+    return []
+
+
+# ============================================================== #
+#  Основной класс CommandHandler
+# ============================================================== #
 class CommandHandler:
     def __init__(self, vk):
         """vk - экземпляр обёртки VK (с методами send, send_big, api, trigger_check)
         tracker создаётся на основе ForumTracker(vk).
         """
         self.vk = vk
-        # ForumTracker ожидает vk или (xf_user, xf_tfa, xf_session, vk)
         try:
             self.tracker = ForumTracker(vk)
         except Exception:
-            # попытка с конфигом внутри ForumTracker
-            self.tracker = ForumTracker(None) if hasattr(ForumTracker, '__call__') else None
+            # если ничего не получилось — создаём без vk (некритично для некоторых команд)
+            try:
+                self.tracker = ForumTracker(None)
+            except Exception:
+                self.tracker = None
         self._last_msg = None
 
     # ---------------------------------------------------------
@@ -111,10 +183,24 @@ class CommandHandler:
             if cmd == "/checkcookies":
                 return self.cmd_checkcookies(peer_id)
 
+            # шаблоны
+            if cmd == "/addsh":
+                return self.cmd_addsh(peer_id, parts)
+            if cmd == "/removesh":
+                return self.cmd_removesh(peer_id, parts)
+            if cmd == "/shablon":
+                return self.cmd_shablon(peer_id, parts)
+
+            # профили
+            if cmd == "/profile":
+                return self.cmd_profile(peer_id, parts)
+            if cmd == "/checkpr":
+                return self.cmd_checkpr(peer_id, parts)
+
             # --- админ команды ---
             admin_cmds = (
-                "/kick","/ban","/unban","/mute","/unmute",
-                "/warn","/warns","/clearwarns","/stats"
+                "/kick", "/ban", "/unban", "/mute", "/unmute",
+                "/warn", "/warns", "/clearwarns", "/stats"
             )
             if cmd in admin_cmds and not is_admin(getattr(self.vk, 'api', None), peer_id, user_id):
                 self.vk.send(peer_id, "❌ У вас нет прав для этой команды.")
@@ -135,17 +221,11 @@ class CommandHandler:
             self.vk.send(peer_id, "Неизвестная команда. Напиши /help")
 
         except Exception as e:
-            # всегда логируем и отправляем пользователю информативную ошибку
             try:
                 self.vk.send(peer_id, f"Ошибка: {e}")
             except Exception:
                 pass
             traceback.print_exc()
-
-
-# ==============================================================
-#  2) РЕАЛИЗАЦИЯ КОМАНД
-# ==============================================================
 
     # -------------------- DEBUG (ответ-проверка формы) --------------------
     def cmd_debug_otvet(self, peer_id, parts):
@@ -191,15 +271,15 @@ class CommandHandler:
 
         url = normalize_url(parts[1])
 
-    # Проверяем что ссылка относится к форуму
+        # Проверяем что ссылка относится к форуму
         if not url.startswith(FORUM_BASE):
             return self.vk.send(peer_id, f"❌ Можно отслеживать только ссылки: {FORUM_BASE}")
 
-    # ---------------------------------------------------------
-    #       ДЕТЕКТ КАТЕГОРИИ (forum vs thread)
-    # ---------------------------------------------------------
+        # ---------------------------------------------------------
+        #       ДЕТЕКТ КАТЕГОРИИ (forum vs thread)
+        # ---------------------------------------------------------
         clean_url = url.split("&")[0]
-  
+
         if "/index.php?forums/" in clean_url:
             typ = "forum"
         elif "/index.php?threads/" in clean_url:
@@ -207,45 +287,46 @@ class CommandHandler:
         else:
             return self.vk.send(peer_id, "❌ Эта ссылка не является ни разделом, ни темой.")
 
-    # ---------------------------------------------------------
-    #       ПОЛУЧАЕМ ПОСЛЕДНИЙ ID
-    # ---------------------------------------------------------
+        # ---------------------------------------------------------
+        #       ПОЛУЧАЕМ ПОСЛЕДНИЙ ID
+        # ---------------------------------------------------------
         latest = None
-
         try:
-        # Если это тема — берём ID последнего поста
+            # Если это тема — берём ID последнего поста
             if typ == "thread":
-                latest = self.tracker.fetch_latest_post_id(url)
+                if hasattr(self.tracker, "fetch_latest_post_id"):
+                    latest = self.tracker.fetch_latest_post_id(clean_url)
 
-        # Если это раздел — берём TID самой последней темы
+            # Если это раздел — берём TID самой последней темы
             elif typ == "forum":
-                html = self.tracker.fetch_html(url)
-                topics = parse_forum_topics(html, url)
+                html = self.tracker.fetch_html(clean_url)
+                topics = parse_forum_topics(html, clean_url)
                 if topics:
-                    latest = max(t["tid"] for t in topics)
-
+                    try:
+                        latest = max(int(t["tid"]) for t in topics)
+                    except Exception:
+                        latest = None
         except Exception:
-            pass
+            latest = None
 
-    # ---------------------------------------------------------
-    #        СОХРАНЯЕМ В БАЗУ
-    # ---------------------------------------------------------
+        # ---------------------------------------------------------
+        #        СОХРАНЯЕМ В БАЗУ
+        # ---------------------------------------------------------
         add_track(peer_id, clean_url, typ)
 
         if latest:
             try:
                 update_last(peer_id, clean_url, str(latest))
-            except:
+            except Exception:
                 pass
 
-    # ---------------------------------------------------------
-    #      УВЕДОМЛЕНИЕ
-    # ---------------------------------------------------------
+        # ---------------------------------------------------------
+        #      УВЕДОМЛЕНИЕ
+        # ---------------------------------------------------------
         if typ == "forum":
-            self.vk.send(peer_id, f"📁 Отслеживание раздела добавлено:\n{url}")
+            self.vk.send(peer_id, f"📁 Отслеживание раздела добавлено:\n{clean_url}")
         else:
-            self.vk.send(peer_id, f"📄 Отслеживание темы добавлено:\n{url}")
-
+            self.vk.send(peer_id, f"📄 Отслеживание темы добавлено:\n{clean_url}")
 
     def cmd_untrack(self, peer_id, parts):
         if len(parts) < 2:
@@ -262,7 +343,7 @@ class CommandHandler:
             rows = list_tracks(peer_id)
             if not rows:
                 return self.vk.send(peer_id, "Нет отслеживаемых ссылок.")
-            lines = [f"{u} ({t}) last: {l}" for u,t,l in rows]
+            lines = [f"{u} ({t}) last: {l}" for u, t, l in rows]
             self.vk.send(peer_id, "📌 Отслеживаемые:\n" + "\n".join(lines))
         except Exception as e:
             self.vk.send(peer_id, f"Ошибка list: {e}")
@@ -336,7 +417,8 @@ class CommandHandler:
             try:
                 if hasattr(self.tracker, 'fetch_latest_post_id'):
                     latest = self.tracker.fetch_latest_post_id(url)
-                    if latest: update_last(peer_id, url, str(latest))
+                    if latest:
+                        update_last(peer_id, url, str(latest))
             except Exception:
                 pass
             return self.vk.send(peer_id, "✅ Сообщение отправлено.")
@@ -359,11 +441,13 @@ class CommandHandler:
         topics = parse_forum_topics(html, url)
         if not topics:
             return self.vk.send(peer_id, "⚠️ Темы не найдены.")
-        # берём первые 5 (самые ранние в списке — в зависимости от parse order)
+        # берём первые 5 (в порядке parse)
         last5 = topics[:5]
         out = "📝 Последние темы раздела:\n\n"
         for t in last5:
-            out += f"📄 {t['title']}\n🔗 {t['url']}\n👤 {t['author']}\n\n"
+            # нормализуем ссылку: если это префикс (contains &prefix_id) — пытаемся превратить в thread
+            url_to_send = t['url']
+            out += f"📄 {t['title']}\n🔗 {url_to_send}\n👤 {t['author']}\n\n"
         self.vk.send(peer_id, out)
 
     def cmd_tlistall(self, peer_id, parts):
@@ -395,6 +479,161 @@ class CommandHandler:
             chunks.append(block)
         for c in chunks:
             self.vk.send(peer_id, c)
+
+    # -------------------- ШАБЛОНЫ --------------------
+    def cmd_addsh(self, peer_id, parts):
+        """
+        /addsh <name> <text>
+        """
+        if len(parts) < 2:
+            return self.vk.send(peer_id, "Использование: /addsh <name> <text>")
+        # parts[1] may include both name and text if maxsplit=2 wasn't used; parse robustly
+        rest = parts[1] if len(parts) == 2 else parts[1] + (" " + (parts[2] if len(parts) > 2 else ""))
+        # try split once on space
+        m = re.match(r"(\S+)\s+(.+)", rest)
+        if not m:
+            return self.vk.send(peer_id, "Использование: /addsh <name> <text>")
+        name = m.group(1).strip()
+        text = m.group(2).strip()
+        ok = add_template_for_peer(peer_id, name, text)
+        if ok:
+            self.vk.send(peer_id, f"✅ Шаблон '{name}' добавлен.")
+        else:
+            self.vk.send(peer_id, f"❌ Ошибка при сохранении шаблона '{name}'.")
+
+    def cmd_removesh(self, peer_id, parts):
+        """
+        /removesh <name>
+        """
+        if len(parts) < 2:
+            return self.vk.send(peer_id, "Использование: /removesh <name>")
+        name = parts[1].strip()
+        ok = remove_template_for_peer(peer_id, name)
+        if ok:
+            self.vk.send(peer_id, f"✅ Шаблон '{name}' удалён.")
+        else:
+            self.vk.send(peer_id, f"❌ Шаблон '{name}' не найден.")
+
+    def cmd_shablon(self, peer_id, parts):
+        """
+        /shablon <name> <thread_url>
+        Отправляет шаблон как ответ в указанную тему (uses tracker.post_message).
+        """
+        if len(parts) < 3:
+            return self.vk.send(peer_id, "Использование: /shablon <name> <thread_url>")
+        name = parts[1].strip()
+        url = normalize_url(parts[2].strip())
+        txt = get_template(peer_id, name)
+        if not txt:
+            return self.vk.send(peer_id, f"❌ Шаблон '{name}' не найден.")
+        if not url.startswith(FORUM_BASE):
+            return self.vk.send(peer_id, f"❌ URL должен быть на {FORUM_BASE}")
+        try:
+            res = self.tracker.post_message(url, txt)
+        except Exception as e:
+            return self.vk.send(peer_id, f"Ошибка отправки: {e}")
+        if res.get("ok"):
+            # обновляем last (если нужно)
+            try:
+                if hasattr(self.tracker, "fetch_latest_post_id"):
+                    latest = self.tracker.fetch_latest_post_id(url)
+                    if latest:
+                        update_last(peer_id, url, str(latest))
+            except Exception:
+                pass
+            return self.vk.send(peer_id, f"✅ Шаблон '{name}' отправлен в {url}")
+        else:
+            return self.vk.send(peer_id, f"❌ Ошибка постинга: {res.get('error')}")
+
+    # -------------------- ПРОФИЛИ --------------------
+    def cmd_profile(self, peer_id, parts):
+        """
+        /profile <url> - показать информацию о профиле (если доступно)
+        """
+        if len(parts) < 2:
+            return self.vk.send(peer_id, "Использование: /profile <profile_url>")
+        url = normalize_url(parts[1])
+        if not url.startswith(FORUM_BASE):
+            return self.vk.send(peer_id, f"❌ URL должен быть на {FORUM_BASE}")
+        try:
+            info = self._parse_profile(url)
+            if not info:
+                return self.vk.send(peer_id, "⚠️ Не удалось извлечь информацию о профиле.")
+            lines = [
+                f"👤 {info.get('username','—')}",
+                f"📌 ID: {info.get('user_id','—')}",
+                f"🕘 Регистрация: {info.get('registered','—')}",
+                f"✉️ О себе: {info.get('about','—')[:800]}",
+                f"📝 Постов: {info.get('message_count','—')}"
+            ]
+            self._send_long(peer_id, "\n".join(lines))
+        except Exception as e:
+            self.vk.send(peer_id, f"Ошибка profile: {e}")
+
+    def cmd_checkpr(self, peer_id, parts):
+        """
+        /checkpr <url> - посмотреть чужой профиль (как /profile, алиас)
+        """
+        return self.cmd_profile(peer_id, parts)
+
+    def _parse_profile(self, url: str) -> Optional[Dict[str, str]]:
+        """
+        Простой парсер страницы профиля XenForo: пытается извлечь имя, id, registered, message_count, about.
+        Если профиль недоступен — возвращает None.
+        """
+        try:
+            html = self.tracker.fetch_html(url)
+            if not html:
+                return None
+            soup = __import__("bs4").BeautifulSoup(html, "html.parser")
+
+            # username
+            uname = None
+            el = soup.select_one(".p-title-value .username, h1.p-title-value, .block-minor .username")
+            if el:
+                uname = el.get_text(strip=True)
+            else:
+                el = soup.select_one(".p-profile-header .username")
+                if el:
+                    uname = el.get_text(strip=True)
+
+            # user id from data attributes or url
+            user_id = None
+            m = re.search(r"/members/[^.]+.(\d+)", url)
+            if m:
+                user_id = m.group(1)
+            else:
+                a = soup.select_one("[data-user-id], a[data-user-id]")
+                if a:
+                    user_id = a.get("data-user-id")
+
+            # registered / message count: try common labels
+            registered = None
+            msg_count = None
+            # XenForo often has dl.listPlain or pairs
+            txt = soup.get_text(" ", strip=True)
+            mreg = re.search(r"Registered\s*[:\s]*([A-Za-z0-9,.\- ]+)", txt, re.IGNORECASE)
+            if mreg:
+                registered = mreg.group(1).strip()
+            mmsg = re.search(r"(Messages|Posts)\s*[:\s]*([0-9,]+)", txt, re.IGNORECASE)
+            if mmsg:
+                msg_count = mmsg.group(2).strip()
+
+            # about
+            about = ""
+            about_el = soup.select_one(".p-profile-about, .about, .userAbout, .user-blurb, .message-userContent")
+            if about_el:
+                about = about_el.get_text(" ", strip=True)
+
+            return {
+                "username": uname or "",
+                "user_id": user_id or "",
+                "registered": registered or "",
+                "message_count": msg_count or "",
+                "about": about or ""
+            }
+        except Exception:
+            return None
 
     # -------------------- ADMIN COMMANDS --------------------
     def cmd_kick(self, peer_id, parts):
@@ -491,13 +730,15 @@ class CommandHandler:
             "/track <url>\n/untrack <url>\n/list\n/check\n/checkfa <url>\n"
             "/tlist <url>\n/tlistall <url>\n"
             "/otvet <url> <text>\n/ai <text>\n"
+            "/addsh <name> <text>\n/removesh <name>\n/shablon <name> <thread_url>\n"
+            "/profile <url>\n/checkpr <url>\n"
             "/kick <id>\n/ban <id>\n/unban <id>\n"
             "/mute <id> <sec>\n/unmute <id>\n"
             "/warn <id>\n/warns <id>\n/clearwarns <id>\n/stats"
         )
 
     # ---------------------------------------------------------
-    # 3) УТИЛИТЫ
+    #  УТИЛИТЫ
     # ---------------------------------------------------------
     def _parse_user(self, s: str) -> int:
         if not s:
@@ -512,26 +753,21 @@ class CommandHandler:
         return 0
 
     def _send_long(self, peer_id: int, text: str):
-        """Разбивает длинный текст на чанки и отправляет в VK.
-        Используем запасной механизм, если vk.send_big есть — используем его.
-        """
+        """Разбивает длинный текст на чанки и отправляет в VK."""
         if not text:
             return
-        # предпочитаемый метод — send_big (если реализован)
         try:
             if hasattr(self.vk, 'send_big'):
                 self.vk.send_big(peer_id, text)
                 return
         except Exception:
             pass
-        # разбиваем по 3800 символов
         max_chunk = 3800
-        chunks = [text[i:i+max_chunk] for i in range(0, len(text), max_chunk)]
+        chunks = [text[i:i + max_chunk] for i in range(0, len(text), max_chunk)]
         for ch in chunks:
             try:
                 self.vk.send(peer_id, ch)
             except Exception:
-                # если даже send падает — игнорируем, но печатаем в stdout
                 print(f"[CMD] Failed to send chunk to {peer_id}")
 
 # --- конец файла ---
