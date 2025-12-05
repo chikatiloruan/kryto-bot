@@ -9,8 +9,10 @@ FORUM_BASE = "https://forum.matrp.ru"
 
 POLL_INTERVAL_SEC = 10
 
-# config.py (добавь в свой существующий config.py)
-ADMIN_USER = "ruan"          # логин панели
-ADMIN_PASS = "top"    # пароль панели
-DEBUG_PASS = "sosal"    # отдельный пароль для страницы debug
-# XF_USER, XF_SESSION, XF_TFA_TRUST уже есть в твоём config.py
+XF_PASS = "sosal1005666"
+XF_LOGIN = "qwertyqwerty1321q@gmail.com"
+
+ADMIN_USER = "ruan"          
+ADMIN_PASS = "top"    
+DEBUG_PASS = "sosal"    
+
