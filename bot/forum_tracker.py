@@ -543,7 +543,7 @@ class ForumTracker:
             # ======= формируем список с датами =======
             sortable = []
             for t in topics:
-                dt = t.get("date") or ""
+                dt = t.get("created") or ""
                 tid = int(t.get("tid", 0))
                 sortable.append((dt, tid, t))
 
@@ -575,9 +575,14 @@ class ForumTracker:
                 is_new = False
 
                 # ---- 1) если обе темы имеют дату → сравниваем дату ----
-                if last_topic.get("date") and saved_date:
-                    if last_topic["date"] > saved_date:
+                if last_topic.get("created") and saved_date:
+                    if last_topic["created"] > saved_date:
                         is_new = True
+
+                 # ---- если дата не сохранена (старый формат) → СЧИТАЕМ КАК НОВАЯ ----
+                if saved_date == "":
+                    is_new = True
+
 
                 # ---- 2) fallback — сравниваем tid ----
                 if not is_new:
@@ -592,7 +597,7 @@ class ForumTracker:
                     "🆕 Новая тема в разделе:\n\n"
                     f"📄 {last_topic['title']}\n"
                     f"👤 {last_topic['author']}\n"
-                    f"⏱ {last_topic.get('date','')}\n"
+                    f"⏱ {last_topic.get('created','')}\n"
                     f"🔗 {last_topic['url']}"
                 )
                 try:
@@ -602,7 +607,7 @@ class ForumTracker:
 
                 # сохраняем tid + дату
                 try:
-                    update_last(peer_id, url, f\"{last_tid};;{last_topic.get('date','')}\")
+                    update_last(peer_id, url, f"{last_tid};;{last_topic.get('created','')}")
                 except Exception as e:
                     warn(f"update_last error (forum): {e}")
 
