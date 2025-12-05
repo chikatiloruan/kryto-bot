@@ -158,6 +158,10 @@ class CommandHandler:
             # --- команды ---
             if cmd == "/track":
                 return self.cmd_track(peer_id, parts)
+
+            if cmd == "/debugtopics":
+                return self.cmd_debugtopics(peer_id, parts)
+
             if cmd == "/untrack":
                 return self.cmd_untrack(peer_id, parts)
             if cmd == "/list":
@@ -746,6 +750,41 @@ class CommandHandler:
             "/mute <id> <sec>\n/unmute <id>\n"
             "/warn <id>\n/warns <id>\n/clearwarns <id>\n/stats"
         )
+        
+    def cmd_debugtopics(self, peer_id, parts):
+        if len(parts) < 2:
+            return self.vk.send(peer_id, "Использование: /debugtopics <url-раздела>")
+
+        url = normalize_url(parts[1])
+        if "forums" not in url.lower():
+            return self.vk.send(peer_id, "❌ Это не ссылка на раздел.")
+
+        try:
+            html = self.tracker.fetch_html(url)
+        except Exception as e:
+            return self.vk.send(peer_id, f"Ошибка fetch_html: {e}")
+
+        if not html:
+            return self.vk.send(peer_id, "❌ Не удалось загрузить страницу.")
+
+        topics = parse_forum_topics(html, url)
+        if not topics:
+            return self.vk.send(peer_id, "⚠️ Темы не найдены.")
+
+        out = "🔍 DEBUG TOPICS\n\n"
+
+        for t in topics[:20]:
+            out += (
+                f"TID: {t.get('tid')}\n"
+                f"TITLE: {t.get('title')}\n"
+                f"AUTHOR: {t.get('author')}\n"
+                f"PINNED: {t.get('pinned')}\n"
+                f"CREATED: {t.get('created')}\n"
+                f"URL: {t.get('url')}\n\n"
+            )
+
+        # длинный текст → разбиваем
+        self._send_long(peer_id, out)
 
     # ---------------------------------------------------------
     #  УТИЛИТЫ
