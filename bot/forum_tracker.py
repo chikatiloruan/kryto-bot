@@ -87,7 +87,7 @@ def build_cookies() -> dict:
 #  Parsers: thread posts and forum topics
 # ======================================================================
 
-def parse_thread_posts(html: str, page_url: str) -> List[Dict]:
+def parse_thread_posts(html: str, page_url: str, session=None) -> List[Dict]:
     """
     Улучшенный парсер постов с поддержкой ПОСЛЕДНЕЙ страницы темы.
     """
