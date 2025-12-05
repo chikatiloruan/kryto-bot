@@ -514,86 +514,82 @@ class ForumTracker:
 
         
         if typ == "forum":
-
             topics = parse_forum_topics(html, url)
             if not topics:
                 return
 
-            # ======= формируем список с датами =======
+    # Формируем sortable: (created, tid, topic)
             sortable = []
             for t in topics:
-                dt = t.get("created") or ""
-                tid = int(t.get("tid", 0))
-                sortable.append((dt, tid, t))
-
-            # сортируем по дате → если даты нет, такие в начале
-            sortable.sort(key=lambda x: (x[0], x[1]))
-
-            # последняя тема
-            last_topic = sortable[-1][2]
-            last_tid = sortable[-1][1]
-            last_date = sortable[-1][0]
-
-            for peer_id, _, last_saved in subscribers:
-
-                # last_saved → то, что хранится в БД
-                saved_tid = 0
-                saved_date = ""
-
-                if last_saved and ";;" in str(last_saved):
-                    # формат tid;;date
-                    parts = str(last_saved).split(";;", 1)
-                    try:    saved_tid = int(parts[0])
-                    except: saved_tid = 0
-                    saved_date = parts[1]
-                else:
-                    # старый формат — только tid
-                    try:    saved_tid = int(last_saved)
-                    except: saved_tid = 0
-
-                is_new = False
-
-                # ---- 1) если обе темы имеют дату → сравниваем дату ----
-                if last_topic.get("created") and saved_date:
-                    if saved_date != "0" and last_topic["created"] > saved_date:
-                        is_new = True
-
-                      
-
-                 # ---- если дата не сохранена (старый формат) → СЧИТАЕМ КАК НОВАЯ ----
-                if saved_date == "":
-                    is_new = True
-
-
-                # ---- 2) fallback — сравниваем tid ----
-                if not is_new:
-                    if last_tid > saved_tid:
-                        is_new = True
-
-                if not is_new:
-                    continue
-
-                # отправляем новую тему
-                msg = (
-                    "🆕 Новая тема в разделе:\n\n"
-                    f"📄 {last_topic['title']}\n"
-                    f"👤 {last_topic['author']}\n"
-                    f"⏱ {last_topic.get('created','')}\n"
-                    f"🔗 {last_topic['url']}"
-                )
+                created = t.get("created") or ""
                 try:
-                    self.vk.send(peer_id, msg)
-                except Exception as e:
-                    warn(f"vk send error (forum): {e}")
+                    tid_i = int(t.get("tid", 0))
+                except Exception:
+                    tid_i = 0
+                sortable.append((created, tid_i, t))
 
-                # сохраняем tid + дату
-                try:
-                    created = last_topic.get("created") or "0"
-                    update_last(peer_id, url, f"{last_tid};;{created}")
-                except Exception as e:
-                    warn(f"update_last error (forum): {e}")
+    # Сортируем по created (строка ISO) и затем по tid
+                sortable.sort(key=lambda x: (x[0] or "", x[1]))
 
-            return
+    # берем последнюю (самую свежую)
+                last_created, last_tid, last_topic = sortable[-1][0], sortable[-1][1], sortable[-1][2]
+
+                for peer_id, _, last_saved in subscribers:
+                    saved_tid = 0
+                    saved_date = ""
+
+                    if last_saved and ";;" in str(last_saved):
+                        parts = str(last_saved).split(";;", 1)
+                        try:
+                           saved_tid = int(parts[0])
+                        except Exception:
+                           saved_tid = 0
+                        saved_date = parts[1]
+                    else:
+                        try:
+                            saved_tid = int(last_saved)
+                        except Exception:
+                            saved_tid = 0
+
+                    is_new = False
+
+        # 1) если есть даты у обеих — сравниваем
+                    if last_created and saved_date:
+                        try:
+                # сравнение ISO-строк корректно работает если формат ISO (как у time@datetime)
+                            if last_created > saved_date:
+                                is_new = True
+                        except Exception:
+                            pass
+
+        # 2) fallback — сравниваем tid
+                    if not is_new:
+                        if last_tid > saved_tid:
+                            is_new = True
+
+                    if not is_new:
+                        continue
+
+        # отправляем уведомление
+                    msg = (
+                        "🆕 Новая тема в разделе:\n\n"
+                        f"📄 {last_topic.get('title')}\n"
+                        f"👤 {last_topic.get('author')}\n"
+                        f"⏱ {last_created}\n"
+                        f"🔗 {last_topic.get('url')}"
+                    )
+                    try:
+                        self.vk.send(peer_id, msg)
+                    except Exception as e:
+                        warn(f"vk send error (forum): {e}")
+
+        # сохраняем tid;;created
+                    try:
+                        update_last(peer_id, url, f"{last_tid};;{last_created}")
+                    except Exception as e:
+                        warn(f"update_last error (forum): {e}")
+
+                return
 
 
         # ============================================================
