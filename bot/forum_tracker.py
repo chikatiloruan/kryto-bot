@@ -533,12 +533,7 @@ class ForumTracker:
 
             return
 
-        # ============================================================
-        # FORUM — новые темы (включая pinned)
-        # ============================================================
-         # ============================================================
-        # FORUM — новые темы (определение по дате + fallback по tid)
-        # ============================================================
+        
         if typ == "forum":
 
             topics = parse_forum_topics(html, url)
@@ -607,7 +602,7 @@ class ForumTracker:
 
                 # сохраняем tid + дату
                 try:
-                    update_last(peer_id, url, f"{last_tid};;{last_topic.get('date','')}")
+                    update_last(peer_id, url, f\"{last_tid};;{last_topic.get('date','')}\")
                 except Exception as e:
                     warn(f"update_last error (forum): {e}")
 
