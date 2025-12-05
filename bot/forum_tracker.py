@@ -108,23 +108,21 @@ def parse_thread_posts(html: str, page_url: str, session=None) -> List[Dict]:
     # -----------------------------------------------------------
     # 2) Загружаем последнюю страницу, если она есть
     # -----------------------------------------------------------
-    if last_page > 1:
+    # Если есть последняя страница и передан session — грузим её
+    if last_page > 1 and session:
         if page_url.endswith("/"):
             url_last = f"{page_url}page-{last_page}/"
         else:
             url_last = f"{page_url}/page-{last_page}/"
 
-        from .forum_tracker import ForumTracker  # чтобы использовать session
         try:
-            tracker = ForumTracker
-        except:
-            pass
+            r = session.get(url_last, timeout=15)
+            if r.status_code == 200:
+                html = r.text
+                soup = BeautifulSoup(html or "", "html.parser")
+        except Exception as e:
+            warn(f"Error loading last page: {e}")
 
-        html = tracker.fetch_html(tracker, url_last)
-        if not html:
-            return []
-
-        soup = BeautifulSoup(html or "", "html.parser")
 
     # -----------------------------------------------------------
     # 3) Парсим посты (как у тебя)
